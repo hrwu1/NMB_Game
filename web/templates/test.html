@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>掷骰子按钮测试</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px 0;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+        }
+        .log {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            font-family: monospace;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1>掷骰子按钮测试</h1>
+    
+    <div class="status">
+        <h2>游戏状态</h2>
+        <p>当前玩家: <span id="current-player">-</span></p>
+        <p>选择初始位置模式: <span id="selecting-start">-</span></p>
+        <p>骰子值: <span id="dice-value">-</span></p>
+    </div>
+    
+    <div>
+        <button id="roll-dice">掷骰子</button>
+        <button id="force-start">强制开始游戏</button>
+        <button id="toggle-selecting-start">切换初始位置模式</button>
+        <button id="clear-log">清空日志</button>
+    </div>
+    
+    <h2>日志</h2>
+    <div class="log" id="log"></div>
+    
+    <script>
+        // 初始化连接
+        const socket = io();
+        let gameState = null;
+        
+        // DOM元素
+        const currentPlayerEl = document.getElementById('current-player');
+        const selectingStartEl = document.getElementById('selecting-start');
+        const diceValueEl = document.getElementById('dice-value');
+        const rollDiceBtn = document.getElementById('roll-dice');
+        const forceStartBtn = document.getElementById('force-start');
+        const toggleSelectingStartBtn = document.getElementById('toggle-selecting-start');
+        const clearLogBtn = document.getElementById('clear-log');
+        const logEl = document.getElementById('log');
+        
+        // 记录日志
+        function log(message, isError = false) {
+            const entry = document.createElement('div');
+            entry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+            if (isError) {
+                entry.style.color = 'red';
+            }
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+        
+        // 清空日志
+        clearLogBtn.addEventListener('click', () => {
+            logEl.innerHTML = '';
+            log('日志已清空');
+        });
+        
+        // 更新UI
+        function updateUI() {
+            if (!gameState) return;
+            
+            currentPlayerEl.textContent = gameState.current_player;
+            selectingStartEl.textContent = gameState.selecting_start;
+            diceValueEl.textContent = gameState.dice_value || '0';
+            
+            // 日志状态
+            log(`状态更新: 玩家=${gameState.current_player}, 初始位置=${gameState.selecting_start}, 骰子=${gameState.dice_value}`);
+        }
+        
+        // 连接事件
+        socket.on('connect', () => {
+            log('已连接到服务器');
+            
+            // 加入游戏 (使用URL参数中的game_id)
+            const urlParams = new URLSearchParams(window.location.search);
+            const gameId = urlParams.get('game_id');
+            
+            if (gameId) {
+                log(`尝试加入游戏: ${gameId}`);
+                socket.emit('join_game', {
+                    game_id: gameId
+                });
+            } else {
+                log('未指定游戏ID', true);
+            }
+        });
+        
+        // 游戏状态事件
+        socket.on('game_state', (state) => {
+            log(`收到游戏状态: selecting_start=${state.selecting_start}, dice_value=${state.dice_value}`);
+            gameState = state;
+            updateUI();
+        });
+        
+        // 骰子结果事件
+        socket.on('dice_result', (data) => {
+            log(`掷骰子结果: ${data.dice_value}`);
+        });
+        
+        // 成功事件
+        socket.on('success', (data) => {
+            log(`成功: ${data.message}`);
+        });
+        
+        // 错误事件
+        socket.on('error', (data) => {
+            log(`错误: ${data.message}`, true);
+        });
+        
+        // 掷骰子按钮
+        rollDiceBtn.addEventListener('click', () => {
+            log('点击掷骰子按钮');
+            socket.emit('roll_dice', {});
+        });
+        
+        // 强制开始游戏按钮
+        forceStartBtn.addEventListener('click', () => {
+            log('点击强制开始游戏按钮');
+            socket.emit('roll_dice', {
+                force_start: true
+            });
+        });
+        
+        // 切换初始位置模式
+        toggleSelectingStartBtn.addEventListener('click', () => {
+            if (!gameState) return;
+            
+            const newValue = !gameState.selecting_start;
+            log(`手动切换初始位置模式为: ${newValue}`);
+            
+            // 直接修改前端状态
+            gameState.selecting_start = newValue;
+            updateUI();
+            
+            // 发送自定义事件通知服务器
+            socket.emit('custom_event', {
+                type: newValue ? 'enable_selecting_start' : 'all_positions_set',
+                message: `手动${newValue ? '启用' : '禁用'}初始位置选择模式`
+            });
+        });
+    </script>
+</body>
+</html> 

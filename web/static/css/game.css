@@ -1,0 +1,184 @@
+/* 游戏页面样式 */
+.game-container {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.game-board {
+    flex: 0 0 60%;
+    position: relative;
+    background-color: #2d2d42;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+    cursor: pointer; /* 指示棋盘可点击 */
+}
+
+/* 初始位置选择模式样式 */
+.selecting-start .game-board {
+    border: 3px dashed #ffcc00;
+    box-shadow: 0 0 15px rgba(255, 204, 0, 0.5);
+    border-radius: 10px;
+    padding: 5px;
+}
+
+#game-canvas {
+    border: 1px solid #666;
+    background-color: #2d2d42;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.selecting-start #game-canvas {
+    cursor: crosshair;
+}
+
+.game-controls {
+    flex: 0 0 35%;
+    padding: 20px;
+    background-color: #3a3a5a;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+}
+
+.game-info, .floor-controls, .action-controls, .player-list {
+    background-color: #2d2d42;
+    padding: 1.5rem;
+    border-radius: 10px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+}
+
+.game-info h2, .floor-controls h3, .action-controls h3, .player-list h3 {
+    margin-bottom: 1rem;
+    color: #ffffff;
+    border-bottom: 1px solid #3f3f5a;
+    padding-bottom: 0.5rem;
+}
+
+.player-info, .dice-container {
+    margin-bottom: 1rem;
+}
+
+.dice-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.floor-buttons {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+#current-floor {
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+.action-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+.action-btn {
+    width: 100%;
+    padding: 0.8rem;
+    transition: all 0.3s ease;
+}
+
+.action-btn.active {
+    background-color: #ffcc00;
+    color: #000;
+    font-weight: bold;
+    box-shadow: 0 0 10px rgba(255, 204, 0, 0.5);
+}
+
+.action-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+.floor-btn {
+    padding: 0.5rem 1rem;
+    transition: all 0.3s ease;
+}
+
+.floor-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+}
+
+/* 玩家列表样式 */
+#players-container {
+    list-style: none;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.player-item {
+    padding: 0.8rem;
+    margin-bottom: 0.5rem;
+    border-radius: 5px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #3f3f5a;
+    transition: all 0.3s ease;
+}
+
+.player-item:hover {
+    background-color: #4c4c6e;
+}
+
+.player-item.current {
+    border: 2px solid #ffcc00;
+    background-color: #4a4a67;
+}
+
+.player-color {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    margin-right: 10px;
+}
+
+.player-name-container {
+    display: flex;
+    align-items: center;
+}
+
+.player-stats {
+    font-size: 0.9rem;
+    color: #cccccc;
+}
+
+/* 状态提示区域 */
+.status-message {
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    padding: 10px 15px;
+    border-radius: 5px;
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    display: none;
+    max-width: 90%;
+    text-align: center;
+}
+
+.status-message.visible {
+    display: block;
+    animation: fadeIn 0.3s;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+} 
