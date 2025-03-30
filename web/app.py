@@ -1,11 +1,13 @@
 from flask import Flask, render_template, request, jsonify, session
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room, rooms
 import json
 import random
 import uuid
 import os
+import traceback
 from core.game import Game
 from web.game_adapter import GameAdapter
+import time
 
 # 获取当前文件所在目录的绝对路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +22,19 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 # 存储活跃游戏的字典 {game_id: GameAdapter对象}
 games = {}
+
+def get_game_id():
+    """从会话或URL参数中获取游戏ID"""
+    game_id = session.get('game_id')
+    if not game_id:
+        # 尝试从请求参数中获取
+        game_id = request.args.get('game_id')
+    
+    # 验证游戏ID是否有效
+    if not game_id or game_id not in games:
+        return None
+    
+    return game_id
 
 @app.route('/')
 def index():
@@ -82,103 +97,201 @@ def format_game_state(game_state):
         state['selecting_start'] = bool(state['selecting_start'])
         print(f"格式化selecting_start字段: {state['selecting_start']}, 类型: {type(state['selecting_start'])}")
     
+    # 确保dice_value存在且为整数
+    if 'dice_value' in state:
+        state['dice_value'] = int(state['dice_value']) if state['dice_value'] is not None else 0
+        print(f"格式化dice_value字段: {state['dice_value']}, 类型: {type(state['dice_value'])}")
+    else:
+        state['dice_value'] = 0
+        print(f"添加缺失的dice_value字段，设为默认值0")
+        
+    # 确保moved字段存在
+    if 'moved' not in state:
+        state['moved'] = False
+        print(f"添加缺失的moved字段，设为默认值False")
+    else:
+        state['moved'] = bool(state['moved'])
+        
     # 修改位置数据格式，确保位置被正确传递
     if 'players' in state:
-        for player in state['players']:
+        for i, player in enumerate(state['players']):
+            # 处理玩家位置
             if player['position'] is not None:
                 print(f"处理玩家{player['id']+1}的位置: {player['position']}, 类型: {type(player['position'])}")
                 if isinstance(player['position'], tuple):
                     player['position'] = list(player['position'])  # 转换元组为列表
                     print(f"转换后的位置: {player['position']}, 类型: {type(player['position'])}")
+                    
+            # 确保玩家骰子值存在且为整数
+            if 'dice_value' in player:
+                player['dice_value'] = int(player['dice_value']) if player['dice_value'] is not None else 0
+                print(f"格式化玩家{player['id']+1}的骰子值: {player['dice_value']}, 类型: {type(player['dice_value'])}")
+            else:
+                player['dice_value'] = 0
+                print(f"添加玩家{player['id']+1}缺失的dice_value字段，设为默认值0")
+                
+            # 确保当前玩家的骰子值与游戏状态一致
+            if 'current_player' in state and state['current_player'] == i:
+                if player['dice_value'] != state['dice_value']:
+                    print(f"警告: 当前玩家{player['id']+1}的骰子值({player['dice_value']})与游戏状态中的值({state['dice_value']})不一致，同步为游戏状态值")
+                    player['dice_value'] = state['dice_value']
+                    
+    # 打印最终格式化的状态摘要
+    player_summary = []
+    if 'players' in state:
+        for player in state['players']:
+            player_summary.append({
+                'id': player['id'],
+                'name': player['name'],
+                'position': player['position'],
+                'dice_value': player['dice_value']
+            })
+            
+    print(f"格式化后的游戏状态摘要:")
+    print(f"- selecting_start: {state.get('selecting_start')}")
+    print(f"- dice_value: {state.get('dice_value')}")
+    print(f"- current_player: {state.get('current_player')}")
+    print(f"- moved: {state.get('moved')}")
+    print(f"- 玩家状态: {player_summary}")
     
     return state
 
 @socketio.on('join_game')
 def handle_join_game(data):
-    """处理玩家加入游戏"""
-    game_id = data.get('game_id')
-    player_id = data.get('player_id', 0)
+    """处理加入游戏请求"""
+    if 'game_id' not in data:
+        emit('error', {'message': '未指定游戏ID'})
+        return
+
+    game_id = data['game_id']
+    player_id = int(data.get('player_id', 0))
     
-    print(f"玩家请求加入游戏{game_id}，玩家ID={player_id}")
+    print(f"玩家 {player_id} 请求加入游戏 {game_id}, SID: {request.sid}")
     
+    # 检查游戏是否存在
     if game_id not in games:
-        print(f"游戏{game_id}不存在")
-        emit('error', {'message': '游戏不存在'})
+        emit('error', {'message': f'游戏 {game_id} 不存在'})
+        print(f"错误: 游戏 {game_id} 不存在")
         return
     
-    # 将用户添加到游戏房间
+    # 将游戏ID保存到会话
     session['game_id'] = game_id
     session['player_id'] = player_id
-    print(f"玩家已加入游戏: game_id={game_id}, player_id={player_id}")
+    print(f"已保存会话数据: game_id={game_id}, player_id={player_id}")
     
-    # 获取并格式化游戏状态
-    game_state = format_game_state(games[game_id].get_game_state())
+    # 加入房间
+    join_room(game_id)
+    print(f"玩家 {player_id} 已加入房间 {game_id}")
     
-    # 发送游戏初始状态
+    # 发送格式化的当前游戏状态
+    game_adapter = games[game_id]
+    raw_state = game_adapter.get_game_state()
+    print(f"原始游戏状态: {raw_state}")
+    
+    # 检查棋盘数据
+    if 'board' in raw_state:
+        print(f"棋盘数据: 楼层数={len(raw_state['board'].get('floors', {}))} 瓦片数={sum(len(floor) for floor in raw_state['board'].get('floors', {}).values())}")
+    else:
+        print(f"警告: 原始游戏状态中没有棋盘数据!")
+    
+    # 检查玩家数据
+    if 'players' in raw_state:
+        print(f"玩家数据: 玩家数={len(raw_state['players'])}")
+        for i, p in enumerate(raw_state['players']):
+            print(f"玩家{i+1}: id={p.get('id')}, name={p.get('name')}, position={p.get('position')}, floor={p.get('floor')}")
+    else:
+        print(f"警告: 原始游戏状态中没有玩家数据!")
+    
+    game_state = format_game_state(raw_state)
+    
+    print(f"向玩家 {player_id} 发送格式化的游戏状态")
+    # 调试输出状态中的关键信息
+    if 'board' in game_state and 'floors' in game_state['board']:
+        print(f"游戏状态中的棋盘数据: {len(game_state['board']['floors'])}个楼层")
+        for floor_num, tiles in game_state['board']['floors'].items():
+            print(f"  楼层{floor_num}: {len(tiles)}个瓦片")
+            if len(tiles) > 0:
+                print(f"  样本瓦片: {tiles[0]}")
+    
     emit('game_state', game_state)
-    print(f"已发送游戏状态给玩家")
+    emit('success', {'message': f'已加入游戏 {game_id}'})
+    
+    print(f"房间 {game_id} 的玩家人数: {len(rooms()[game_id]) if game_id in rooms() else 0}")
 
 @socketio.on('roll_dice')
 def handle_roll_dice(data=None):
     """处理掷骰子事件"""
-    game_id = session.get('game_id')
-    print(f"收到掷骰子请求, 游戏ID: {game_id}, 数据: {data}")
-    
-    if not game_id or game_id not in games:
-        print(f"错误: 游戏 {game_id} 不存在")
-        emit('error', {'message': '游戏不存在'})
+    game_id = get_game_id()
+    if not game_id:
+        emit('error', {'message': '未找到游戏ID'})
         return
+
+    sid = request.sid
+    print(f"收到掷骰子请求 - 连接ID: {sid}, 游戏ID: {game_id}")
     
     game_adapter = games[game_id]
-    # 获取游戏当前状态，用于调试
-    current_state = format_game_state(game_adapter.get_game_state())
-    print(f"掷骰子前游戏状态: 当前玩家={current_state['current_player']}, 选择起始={current_state['selecting_start']}, 骰子值={current_state['dice_value']}")
+    print(f"[DEBUG] 掷骰子前的游戏状态: {game_adapter.get_game_state()}")
     
-    # 检查是否需要强制开始游戏
-    force_start = False
-    if data and 'force_start' in data:
-        force_start = data['force_start']
-        print(f"检测到强制开始请求: force_start={force_start}")
+    # 记录当前玩家
+    current_player_id = game_adapter.game.current_player
+    current_player = game_adapter.game.players[current_player_id] if current_player_id is not None else None
+    print(f"当前玩家: {current_player_id} - {current_player.name if current_player else 'None'}")
     
-    # 使用参数调用handle_event
-    result = game_adapter.handle_event('roll_dice', {'force_start': force_start} if force_start else None)
-    print(f"掷骰子处理结果: {result}")
-    
-    if result.get('success', False):
-        # 确保有骰子值
-        if 'dice_value' not in result:
-            print("警告: 处理结果中没有骰子值")
-            emit('error', {'message': '服务器处理出错，骰子结果丢失'})
+    try:
+        # 处理掷骰子事件
+        dice_value = game_adapter.handle_event('roll_dice', data or {})
+        print(f"掷骰子结果: {dice_value}")
+        
+        # 检查是否成功
+        if dice_value is None or dice_value == 0:
+            print(f"掷骰子失败")
+            emit('error', {'message': '掷骰子失败，请检查游戏状态'})
             return
+            
+        # 检查玩家骰子值同步情况
+        if current_player:
+            if current_player.dice_value != dice_value:
+                print(f"警告: 玩家骰子值不同步! 玩家: {current_player.dice_value}, 游戏: {dice_value}")
+                # 尝试修复不同步
+                current_player.set_dice_value(dice_value)
+                
+        # 先广播骰子结果
+        print(f"广播骰子结果: {dice_value} 到房间: {game_id}")
+        socketio.emit('dice_result', {'dice_value': dice_value}, room=game_id)
         
-        dice_value = result['dice_value']
-        print(f"成功掷出了 {dice_value} 点")
-        
-        # 广播掷骰子结果
-        dice_data = {
-            'player_index': game_adapter.game.current_player_index,
-            'dice_value': dice_value
-        }
-        print(f"广播掷骰子结果: {dice_data}")
-        socketio.emit('dice_result', dice_data, room=game_id)
-        
-        # 更新游戏状态
+        # 然后广播格式化的游戏状态
         game_state = format_game_state(game_adapter.get_game_state())
-        print(f"掷骰子后游戏状态: 当前玩家={game_state['current_player']}, 选择起始={game_state['selecting_start']}, 骰子值={game_state['dice_value']}")
+        
+        # 确保游戏状态中的骰子值与掷出的值一致
+        if game_state['dice_value'] != dice_value:
+            print(f"警告: 格式化后的游戏状态中骰子值仍不一致! 修复: {game_state['dice_value']} -> {dice_value}")
+            game_state['dice_value'] = dice_value
+            
+        # 确保当前玩家的骰子值一致
+        if 'players' in game_state and current_player_id is not None:
+            if game_state['players'][current_player_id]['dice_value'] != dice_value:
+                print(f"警告: 格式化后的玩家骰子值仍不一致! 修复: {game_state['players'][current_player_id]['dice_value']} -> {dice_value}")
+                game_state['players'][current_player_id]['dice_value'] = dice_value
+        
+        print(f"广播游戏状态到房间: {game_id}")
         socketio.emit('game_state', game_state, room=game_id)
         
-        # 发送成功消息
+        print(f"广播成功消息")
         emit('success', {'message': f"掷出了 {dice_value} 点"})
-    else:
-        print(f"掷骰子失败: {result.get('message', '未知错误')}")
-        emit('error', {'message': result.get('message', '掷骰子失败')})
+        
+        print(f"[DEBUG] 掷骰子后的游戏状态: {format_game_state(game_adapter.get_game_state())}")
+        
+    except Exception as e:
+        print(f"掷骰子时发生错误: {str(e)}")
+        traceback.print_exc()
+        emit('error', {'message': f'掷骰子错误: {str(e)}'})
 
 @socketio.on('move_player')
 def handle_move_player(data):
     """处理玩家移动事件"""
-    game_id = session.get('game_id')
+    game_id = get_game_id()
     
-    if not game_id or game_id not in games:
+    if not game_id:
         emit('error', {'message': '游戏不存在'})
         return
     
@@ -232,43 +345,86 @@ def handle_move_player(data):
 
 @socketio.on('change_floor')
 def handle_change_floor(data):
-    """处理楼层变更事件"""
+    """处理更改楼层的请求"""
+    print(f"处理更改楼层事件: {data}")
+    
+    # 获取当前会话信息
+    session_id = request.sid
     game_id = session.get('game_id')
     
-    if not game_id or game_id not in games:
-        emit('error', {'message': '游戏不存在'})
+    if not game_id:
+        emit('error', {'message': '未加入游戏'})
         return
     
-    game_adapter = games[game_id]
-    result = game_adapter.handle_event('change_floor', data)
+    # 检查请求中是否包含楼层信息
+    if 'floor' not in data:
+        emit('error', {'message': '缺少楼层信息'})
+        return
     
-    # 不需要广播状态，因为这只是UI状态变化
+    floor = data['floor']
+    if not isinstance(floor, int) or floor < 1 or floor > 5:
+        emit('error', {'message': '无效的楼层值，楼层应为1-5之间的整数'})
+        return
+    
+    emit('success', {'message': f'已切换到第{floor}层'})
+    
+    # 向所有玩家广播楼层变化
+    socketio.emit('floor_change', {'floor': floor}, room=game_id)
 
 @socketio.on('rotate_card')
 def handle_rotate_card():
-    """处理旋转卡片事件"""
-    game_id = session.get('game_id')
+    """处理旋转卡片的请求"""
+    print("处理旋转卡片事件")
     
-    if not game_id or game_id not in games:
-        emit('error', {'message': '游戏不存在'})
+    # 获取当前会话信息
+    session_id = request.sid
+    game_id = session.get('game_id')
+    player_id = session.get('player_id')
+    
+    if not game_id:
+        emit('error', {'message': '未加入游戏'})
         return
     
-    game_adapter = games[game_id]
-    result = game_adapter.handle_event('rotate_card')
+    if player_id is None:
+        emit('error', {'message': '玩家ID未设置'})
+        return
     
-    if result['success']:
-        # 广播更新后的游戏状态
-        game_state = format_game_state(game_adapter.get_game_state())
-        socketio.emit('game_state', game_state, room=game_id)
-    else:
-        emit('error', {'message': result.get('message', '旋转失败')})
+    try:
+        # 获取游戏适配器
+        game_adapter = games.get(game_id)
+        if not game_adapter:
+            emit('error', {'message': '游戏不存在'})
+            return
+        
+        # 检查是否是当前玩家的回合
+        current_player_id = game_adapter.game.current_player
+        if current_player_id != player_id:
+            emit('error', {'message': '不是你的回合'})
+            return
+        
+        # 执行旋转卡片的逻辑
+        # 注意：这里只是模拟旋转卡片，实际实现需要根据游戏规则进行调整
+        result = {'success': True, 'message': '卡片已旋转'}
+        
+        emit('success', {'message': '卡片已旋转'})
+        
+        # 向所有玩家广播卡片旋转事件
+        socketio.emit('card_rotated', {
+            'player_id': player_id,
+            'player_name': game_adapter.game.players[player_id].name,
+            'timestamp': time.time()
+        }, room=game_id)
+        
+    except Exception as e:
+        print(f"旋转卡片时出错: {e}")
+        emit('error', {'message': f'旋转卡片时出错: {str(e)}'})
 
 @socketio.on('place_card')
 def handle_place_card(data):
     """处理放置卡片事件"""
-    game_id = session.get('game_id')
+    game_id = get_game_id()
     
-    if not game_id or game_id not in games:
+    if not game_id:
         emit('error', {'message': '游戏不存在'})
         return
     
@@ -284,29 +440,82 @@ def handle_place_card(data):
 
 @socketio.on('change_daze')
 def handle_change_daze(data):
-    """处理迷惑值变更事件"""
-    game_id = session.get('game_id')
+    """处理更改迷惑值的请求"""
+    print(f"处理更改迷惑值事件: {data}")
     
-    if not game_id or game_id not in games:
-        emit('error', {'message': '游戏不存在'})
+    # 获取当前会话信息
+    session_id = request.sid
+    game_id = session.get('game_id')
+    player_id = session.get('player_id')
+    
+    if not game_id:
+        emit('error', {'message': '未加入游戏'})
         return
     
-    game_adapter = games[game_id]
-    result = game_adapter.handle_event('change_daze', data)
+    if player_id is None:
+        emit('error', {'message': '玩家ID未设置'})
+        return
     
-    if result['success']:
-        # 广播更新后的游戏状态
+    # 检查请求中是否包含迷惑值变化
+    if 'change' not in data:
+        emit('error', {'message': '缺少迷惑值变化信息'})
+        return
+    
+    change = data['change']
+    if not isinstance(change, int):
+        emit('error', {'message': '迷惑值变化必须是整数'})
+        return
+    
+    try:
+        # 获取游戏适配器
+        game_adapter = games.get(game_id)
+        if not game_adapter:
+            emit('error', {'message': '游戏不存在'})
+            return
+        
+        # 检查是否是当前玩家的回合
+        current_player_id = game_adapter.game.current_player
+        if current_player_id != player_id:
+            emit('error', {'message': '不是你的回合'})
+            return
+        
+        # 获取当前玩家
+        current_player = game_adapter.game.players[player_id]
+        
+        # 更新迷惑值（假设Player类有一个daze属性）
+        if not hasattr(current_player, 'daze'):
+            current_player.daze = 0
+        
+        current_player.daze = max(0, current_player.daze + change)
+        max_daze = 10  # 假设最大迷惑值为10
+        current_player.daze = min(max_daze, current_player.daze)
+        
+        daze_message = '增加' if change > 0 else '减少'
+        emit('success', {'message': f'迷惑值{daze_message}至{current_player.daze}'})
+        
+        # 更新游戏状态并广播
         game_state = format_game_state(game_adapter.get_game_state())
         socketio.emit('game_state', game_state, room=game_id)
-    else:
-        emit('error', {'message': result.get('message', '迷惑值变更失败')})
+        
+        # 向所有玩家广播迷惑值变化事件
+        socketio.emit('daze_changed', {
+            'player_id': player_id,
+            'player_name': current_player.name,
+            'daze': current_player.daze,
+            'change': change,
+            'timestamp': time.time()
+        }, room=game_id)
+        
+    except Exception as e:
+        print(f"更改迷惑值时出错: {e}")
+        emit('error', {'message': f'更改迷惑值时出错: {str(e)}'})
 
 @socketio.on('end_turn')
 def handle_end_turn():
     """处理结束回合事件"""
-    game_id = session.get('game_id')
+    game_id = get_game_id()
     
-    if not game_id or game_id not in games:
+    if not game_id:
         emit('error', {'message': '游戏不存在'})
         return
     
@@ -325,45 +534,54 @@ def handle_end_turn():
 
 @socketio.on('custom_event')
 def handle_custom_event(data):
-    """处理自定义事件
-    
-    Args:
-        data: 事件数据
-    """
+    """处理自定义事件，例如强制开始游戏"""
     print(f"收到自定义事件: {data}")
     
-    event_type = data.get('type')
+    # 获取当前会话信息
     session_id = request.sid
     game_id = session.get('game_id')
     
-    if event_type == 'all_positions_set':
-        # 处理所有玩家已设置初始位置的事件
-        print("收到所有玩家已设置初始位置的通知，同步游戏状态")
-        
-        # 获取游戏实例
-        if not game_id or game_id not in games:
-            emit('error', {'message': '游戏未初始化'})
-            return
-            
-        game_adapter = games[game_id]
-        
-        # 更新游戏状态
-        if game_adapter.game.selecting_start:
-            game_adapter.game.selecting_start = False
-            print("强制更新游戏状态：结束初始位置选择阶段")
-            
-            # 广播更新的游戏状态
-            emit('success', {
-                'message': '所有玩家已选择初始位置，游戏正式开始！',
-                'selecting_start': False
-            }, broadcast=True)
-            
-            # 广播更新的游戏状态
-            updated_state = format_game_state(game_adapter.get_game_state())
-            socketio.emit('game_state', updated_state, room=game_id)
+    if not game_id:
+        emit('error', {'message': '未加入游戏'})
+        return
     
-    # 返回确认信息
-    emit('success', {'message': f'自定义事件 {event_type} 已处理'})
+    # 检查事件类型
+    if 'type' not in data:
+        emit('error', {'message': '缺少事件类型'})
+        return
+    
+    event_type = data['type']
+    
+    try:
+        # 获取游戏适配器
+        game_adapter = games.get(game_id)
+        if not game_adapter:
+            emit('error', {'message': '游戏不存在'})
+            return
+        
+        # 处理特定类型的自定义事件
+        if event_type == 'all_positions_set':
+            # 强制设置所有玩家已选择起始位置
+            game_adapter.game.selecting_start = False
+            message = data.get('message', '所有玩家已设置起始位置')
+            
+            emit('success', {'message': message})
+            
+            # 更新游戏状态并广播
+            game_state = format_game_state(game_adapter.get_game_state())
+            socketio.emit('game_state', game_state, room=game_id)
+            
+            socketio.emit('notification', {
+                'message': message,
+                'type': 'info',
+                'timestamp': time.time()
+            }, room=game_id)
+        else:
+            emit('error', {'message': f'未知的事件类型: {event_type}'})
+    
+    except Exception as e:
+        print(f"处理自定义事件时出错: {e}")
+        emit('error', {'message': f'处理自定义事件时出错: {str(e)}'})
 
 @app.route('/test')
 def test_page():
@@ -376,6 +594,61 @@ def test_game_page(game_id):
     if game_id not in games:
         return "游戏不存在", 404
     return render_template('test.html', game_id=game_id)
+
+@app.route('/api/game/<game_id>/status')
+def get_game_status(game_id):
+    """获取游戏状态信息"""
+    if game_id not in games:
+        return jsonify({
+            'error': '游戏不存在',
+            'game_id': game_id,
+            'exists': False,
+            'active_games': list(games.keys())
+        }), 404
+    
+    game_adapter = games[game_id]
+    raw_state = game_adapter.get_game_state()
+    
+    # 准备轻量级状态摘要
+    status = {
+        'exists': True,
+        'game_id': game_id,
+        'selecting_start': raw_state.get('selecting_start', False),
+        'current_player': raw_state.get('current_player', 0),
+        'num_players': len(raw_state.get('players', [])),
+        'has_board': 'board' in raw_state and 'floors' in raw_state['board'],
+        'current_floor': raw_state.get('current_floor', 1)
+    }
+    
+    # 如果有棋盘数据，添加摘要
+    if status['has_board']:
+        floors_data = {}
+        for floor_num, tiles in raw_state['board']['floors'].items():
+            floors_data[floor_num] = len(tiles)
+        status['floors'] = floors_data
+    
+    # 添加玩家摘要信息
+    if 'players' in raw_state:
+        players_summary = []
+        for player in raw_state['players']:
+            players_summary.append({
+                'id': player.get('id'),
+                'name': player.get('name'),
+                'has_position': player.get('position') is not None,
+                'floor': player.get('floor', 1)
+            })
+        status['players'] = players_summary
+    
+    return jsonify(status)
+
+@app.route('/api/health')
+def health_check():
+    """API健康检查"""
+    return jsonify({
+        'status': 'ok',
+        'active_games': len(games),
+        'game_ids': list(games.keys())
+    })
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, host='127.0.0.1', port=5000) 

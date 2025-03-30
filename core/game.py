@@ -133,8 +133,17 @@ class Game:
             pygame.time.wait(80)
         
         # Generate final value
-        self.dice_value = random.randint(1, 6)
-        return self.dice_value
+        final_value = random.randint(1, 6)
+        
+        # 首先更新Game对象的骰子值
+        self.dice_value = final_value
+        
+        # 然后更新当前玩家的骰子值
+        self.current_player.set_dice_value(final_value)
+        
+        print(f"掷骰子成功，点数为: {final_value}, 玩家骰子值为: {self.current_player.dice_value}")
+        
+        return final_value
     
     def get_valid_moves(self, start_pos, steps, use=1):
         """Get valid move tiles
@@ -312,6 +321,12 @@ class Game:
         self.current_card = None  # 确保清除卡牌状态
         self.card_rotation = 0
         self.target_region = None
+        
+        # 重置骰子值 - 确保Game和Player对象同步
+        self.dice_value = 0
+        self.current_player.set_dice_value(0)
+        
+        print(f"切换到下一个玩家: {self.current_player.name}, 重置骰子值: Game={self.dice_value}, Player={self.current_player.dice_value}")
         
         # Update game statistics
         MOVES_NUM += 1
@@ -643,8 +658,25 @@ class Game:
         if (tile_x, tile_y) in self.valid_tiles:
             print(f"Valid endpoint selected: ({tile_x}, {tile_y})")
             
+            # 计算移动距离
+            current_x, current_y = self.current_player.pos
+            manhattan_distance = abs(tile_x - current_x) + abs(tile_y - current_y)
+            
+            # 减少玩家的骰子值
+            self.current_player.reduce_dice_value(manhattan_distance)
+            
             # Move player
             self.current_player.set_position(tile_x, tile_y)
+            
+            # 如果玩家还有剩余骰子值，允许继续移动
+            if self.current_player.get_dice_value() > 0:
+                # 重新计算可移动的格子
+                self.valid_tiles = self.get_valid_moves(self.current_player.pos, self.current_player.get_dice_value())
+                self.inner_tiles = self.valid_tiles
+                if self.valid_tiles:
+                    self.move_phase = PHASE_SELECT_END
+                    print(f"Player can still move {self.current_player.get_dice_value()} steps")
+                    return True
             
             # Check special tiles
             tile_type = self.tile_system.get_special_tile(tile_x, tile_y, self.current_player.floor)
@@ -661,9 +693,10 @@ class Game:
                 self.next_player()
                 print(f"Moving to next player: {self.current_player.name}")
             
-            # Clear valid tiles
-            self.valid_tiles = set()
-            self.inner_tiles = set()
+            # Clear valid tiles if no more moves
+            if self.current_player.get_dice_value() == 0:
+                self.valid_tiles = set()
+                self.inner_tiles = set()
             
             return True
         else:

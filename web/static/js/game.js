@@ -1,7 +1,81 @@
 // 游戏页面逻辑
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('=== 页面加载完成，初始化游戏 ===');
+    
+    // 检查服务器提供的游戏ID
+    console.log('游戏ID (从服务器):', GAME_ID);
+    
+    // 如果GAME_ID未定义，尝试从URL获取
+    if (typeof GAME_ID === 'undefined' || !GAME_ID) {
+        const urlParams = new URLSearchParams(window.location.search);
+        const gameIdFromUrl = urlParams.get('game_id') || window.location.pathname.split('/').pop();
+        
+        if (gameIdFromUrl && gameIdFromUrl !== 'game') {
+            console.log('游戏ID (从URL):', gameIdFromUrl);
+            window.GAME_ID = gameIdFromUrl; // 全局存储
+        } else {
+            console.error('错误: 未找到有效的游戏ID!');
+            alert('错误: 未找到有效的游戏ID');
+            return;
+        }
+    }
+    
+    // 创建一个仅用于调试的全局变量
+    window.debugGameState = {
+        receivedEvents: {},
+        socketConnected: false,
+        lastDiceValue: 0,
+        eventCount: {
+            game_state: 0,
+            dice_result: 0,
+            success: 0,
+            error: 0
+        }
+    };
+    
     // 初始化Socket.io连接
-    const socket = io();
+    const socket = io({
+        reconnectionAttempts: 5,
+        timeout: 10000,
+        transports: ['websocket', 'polling']
+    });
+    
+    // 添加Socket.IO连接调试
+    socket.on('connect', () => {
+        console.log('Socket.IO 连接成功，Socket ID:', socket.id);
+        window.debugGameState.socketConnected = true;
+        
+        // 测试: 列出所有注册的事件监听器
+        console.log('当前Socket事件监听器:');
+        console.log('- connect');
+        console.log('- disconnect');
+        console.log('- game_state');
+        console.log('- dice_result');
+        console.log('- success');
+        console.log('- error');
+        
+        // 连接成功后立即加入游戏
+        console.log(`准备加入游戏: ${GAME_ID}`);
+        const storedPlayerId = localStorage.getItem('playerId') || 0;
+        console.log(`使用存储的玩家ID: ${storedPlayerId}`);
+        
+        socket.emit('join_game', {
+            game_id: GAME_ID,
+            player_id: storedPlayerId
+        });
+        
+        console.log('join_game事件已发送');
+        showStatusMessage('已连接到服务器，准备加入游戏...');
+    });
+    
+    socket.on('disconnect', () => {
+        console.log('Socket.IO 连接断开!');
+        window.debugGameState.socketConnected = false;
+    });
+    
+    socket.on('connect_error', (error) => {
+        console.error('Socket.IO 连接错误:', error);
+    });
     
     // 获取DOM元素
     const gameCanvas = document.getElementById('game-canvas');
@@ -40,175 +114,265 @@ document.addEventListener('DOMContentLoaded', () => {
         '#00ffff'  // 青色
     ];
     
-    // 连接到游戏
-    socket.on('connect', () => {
-        console.log('已连接到服务器，Socket ID:', socket.id);
-        showStatusMessage('已连接到服务器，准备游戏中...');
+    // 添加全局事件监听器，捕获所有Socket.IO事件
+    const originalOnevent = socket.onevent;
+    socket.onevent = function(packet) {
+        const args = packet.data || [];
+        console.log(`接收到Socket.IO事件: ${args[0]}`, args.slice(1));
         
-        // 加入游戏
-        console.log('尝试加入游戏:', GAME_ID);
-        socket.emit('join_game', {
-            game_id: GAME_ID,
-            player_id: localStorage.getItem('playerId') || 0 // 从本地存储获取玩家ID
-        });
-    });
-    
-    // 连接错误处理
-    socket.on('connect_error', (err) => {
-        console.error('连接错误:', err);
-        showStatusMessage('连接错误: ' + err.message, true);
-    });
-    
-    socket.on('disconnect', () => {
-        console.log('与服务器断开连接');
-        showStatusMessage('与服务器断开连接，请刷新页面', true);
-    });
-    
-    // 添加初始化游戏的帮助信息
-    function showInitialHelp() {
-        if (gameState && gameState.selecting_start) {
-            const currentPlayer = gameState.players[gameState.current_player];
-            showStatusMessage(`游戏初始化：请为玩家${currentPlayer.name}选择初始位置，点击棋盘上的有效格子放置棋子`, false, 8000);
+        // 记录事件到调试对象
+        if (args[0]) {
+            window.debugGameState.receivedEvents[args[0]] = args.slice(1);
+            
+            if (window.debugGameState.eventCount[args[0]] !== undefined) {
+                window.debugGameState.eventCount[args[0]]++;
+            }
         }
-    }
-    
-    // 监听游戏状态更新
-    socket.on('game_state', (state) => {
-        console.log('收到游戏状态更新:', state);
-        console.log('选择初始位置模式:', state.selecting_start, typeof state.selecting_start);
         
-        // 调试玩家位置信息
+        originalOnevent.call(this, packet);
+    };
+    
+    // 重新定义Socket.IO事件处理函数
+    
+    // 游戏状态更新事件
+    function handleGameState(state) {
+        console.log('!!! game_state 事件触发 !!!');
+        console.log('=== 收到游戏状态更新 ===');
+        console.log('原始状态数据:', state);
+        
+        if (!state) {
+            console.error('收到的游戏状态为空!');
+            return;
+        }
+        
+        // 检查关键数据
+        console.log('状态数据检查:');
+        console.log('- 骰子值:', state.dice_value, '类型:', typeof state.dice_value);
+        console.log('- 初始位置选择:', state.selecting_start, '类型:', typeof state.selecting_start);
+        console.log('- 当前玩家:', state.current_player, '类型:', typeof state.current_player);
+        
+        // 检查棋盘数据
+        if (state.board && state.board.floors) {
+            console.log('棋盘数据:');
+            console.log('- 楼层数:', Object.keys(state.board.floors).length);
+            for (const floorNum in state.board.floors) {
+                const tiles = state.board.floors[floorNum];
+                console.log(`- 楼层${floorNum}: ${tiles.length}个瓦片`);
+                if (tiles.length > 0) {
+                    console.log(`  样本瓦片:`, tiles[0]);
+                }
+            }
+        } else {
+            console.error('状态中没有棋盘数据!');
+        }
+        
+        // 检查玩家数据
         if (state.players) {
-            state.players.forEach((player, index) => {
-                console.log(`玩家${player.name}位置: ${JSON.stringify(player.position)}, 类型: ${typeof player.position}`);
+            console.log('玩家数据:');
+            console.log('- 玩家数:', state.players.length);
+            state.players.forEach((player, idx) => {
+                console.log(`- 玩家${idx+1}: id=${player.id}, name=${player.name}, position=${JSON.stringify(player.position)}, floor=${player.floor}`);
+            });
+        } else {
+            console.error('状态中没有玩家数据!');
+        }
+        
+        const prevState = gameState;
+        const prevDiceValue = gameState ? gameState.dice_value : 0;
+        const prevMoved = gameState ? gameState.moved : false;
+        
+        console.log('更新前的状态:', {
+            prevDiceValue: prevDiceValue,
+            prevMoved: prevMoved,
+            currentPlayer: prevState ? prevState.current_player : 'undefined'
+        });
+        
+        // 检查玩家是否切换
+        const isPlayerChanged = state.current_player !== undefined && 
+                              prevState && 
+                              state.current_player !== prevState.current_player;
+        
+        console.log('是否切换玩家:', isPlayerChanged);
+        
+        // 计算新的骰子值
+        let newDiceValue;
+        if (isPlayerChanged) {
+            // 玩家切换时，使用新状态的骰子值
+            newDiceValue = parseInt(state.dice_value || 0);
+            console.log('玩家切换，使用新骰子值:', newDiceValue);
+        } else {
+            // 非玩家切换，优先使用之前的骰子值，除非之前为0且新值不为0
+            newDiceValue = (parseInt(prevDiceValue) > 0) ? 
+                parseInt(prevDiceValue) : 
+                parseInt(state.dice_value || 0);
+            console.log('非玩家切换，计算骰子值:', {
+                prevValue: prevDiceValue,
+                stateValue: state.dice_value,
+                finalValue: newDiceValue
             });
         }
         
-        // 保存上一次的状态
-        const prevState = gameState;
-        const isFirstState = !prevState;
+        // 保存原始gameState对象用于比较
+        const originalGameState = gameState ? JSON.parse(JSON.stringify(gameState)) : null;
         
         // 更新游戏状态
-        gameState = state;
+        gameState = {
+            ...state,
+            dice_value: newDiceValue,
+            moved: isPlayerChanged ? state.moved : prevMoved,
+            selecting_start: Boolean(state.selecting_start)
+        };
         
-        // 确保选择初始位置模式的值是布尔类型
-        if (typeof gameState.selecting_start === 'string') {
-            console.log("选择初始位置模式值是字符串，转换为布尔值:", gameState.selecting_start);
-            gameState.selecting_start = gameState.selecting_start === 'true' || gameState.selecting_start === '1';
-            console.log("转换后的选择初始位置模式:", gameState.selecting_start, typeof gameState.selecting_start);
-        }
+        // 记录到调试对象
+        window.debugGameState.lastDiceValue = newDiceValue;
         
-        // 确保前端的当前楼层与游戏状态同步
-        currentFloorValue = state.current_floor;
+        console.log('更新后的gameState:', {
+            dice_value: gameState.dice_value,
+            moved: gameState.moved,
+            current_player: gameState.current_player,
+            selecting_start: gameState.selecting_start
+        });
         
-        // 检查是否所有玩家都有位置信息
-        let allPlayersHavePositions = true;
-        if (gameState.players) {
-            for (const player of gameState.players) {
-                if (!player.position) {
-                    allPlayersHavePositions = false;
-                    break;
+        // 检查游戏状态是否为第一次加载 (prevState 为 null)
+        if (!prevState) {
+            console.log('首次加载游戏状态!');
+            
+            // 立即初始化棋盘 - 这是关键步骤
+            console.log('初始化棋盘...');
+            try {
+                drawBoard();
+                console.log('棋盘初始化成功!');
+            } catch (error) {
+                console.error('棋盘初始化错误:', error);
+            }
+            
+            // 检查是否处于选择初始位置阶段，显示提示
+            if (gameState.selecting_start) {
+                console.log('游戏处于初始位置选择阶段，显示提示');
+                
+                // 确保当前玩家存在
+                if (gameState.players && gameState.current_player !== undefined) {
+                    const currentPlayer = gameState.players[gameState.current_player];
+                    if (currentPlayer) {
+                        showStatusMessage(`请为${currentPlayer.name}选择初始位置，点击棋盘上的有效格子放置`);
+                    }
                 }
             }
         }
         
-        // 如果所有玩家都有位置但selecting_start仍为true，则强制设为false并发送一个后端请求
-        if (allPlayersHavePositions && gameState.selecting_start) {
-            console.log("所有玩家都有位置，但选择初始位置模式仍为true，强制设为false");
-            gameState.selecting_start = false;
-            
-            // 向服务器发送一个自定义事件，通知所有玩家已选择初始位置
-            socket.emit('custom_event', {
-                type: 'all_positions_set',
-                message: '所有玩家已选择初始位置，强制开始游戏'
-            });
-            
-            // 通知服务器重置selecting_start状态
-            socket.emit('roll_dice', {
-                force_start: true
-            });
-        }
-        
-        // 如果是第一次接收状态，保存玩家ID
-        if (localStorage.getItem('playerId') === null && state.players && state.players.length > 0) {
-            // 这里暂时注释掉自动设置玩家ID的逻辑，让玩家可以手动选择角色
-            // const playerId = state.players[0].id;
-            // localStorage.setItem('playerId', playerId);
-            // console.log('设置玩家ID:', playerId);
-        }
-        
-        // 检测玩家是否已移动
-        if (prevState && prevState.players && gameState.players) {
-            // 获取当前玩家
-            const currentPlayerIndex = gameState.current_player;
-            const currentPlayer = gameState.players[currentPlayerIndex];
-            const prevPlayer = prevState.players[currentPlayerIndex];
-            
-            // 判断是否移动了位置
-            if (currentPlayer && prevPlayer && 
-                JSON.stringify(currentPlayer.position) !== JSON.stringify(prevPlayer.position)) {
-                gameState.moved = true;
-            } else if (prevState.current_player !== gameState.current_player) {
-                // 如果玩家切换了，重置moved状态
-                gameState.moved = false;
+        // 同步玩家的骰子值
+        if (gameState.players && gameState.current_player !== undefined) {
+            const currentPlayer = gameState.players[gameState.current_player];
+            if (currentPlayer) {
+                const oldPlayerDiceValue = currentPlayer.dice_value;
+                currentPlayer.dice_value = gameState.dice_value;
+                console.log('同步当前玩家骰子值:', {
+                    player_name: currentPlayer.name,
+                    old_dice_value: oldPlayerDiceValue,
+                    new_dice_value: currentPlayer.dice_value
+                });
             }
         }
         
-        updateUI();
-        
-        // 如果是首次加载状态并且正在选择初始位置，显示帮助信息
-        if (isFirstState) {
-            setTimeout(showInitialHelp, 1000);
+        // 强制更新骰子显示值
+        if (diceResult) {
+            if (gameState.dice_value > 0) {
+                console.log(`强制更新骰子显示元素为: ${gameState.dice_value}`);
+                diceResult.textContent = gameState.dice_value;
+            } else {
+                console.log('骰子值为0，重置骰子显示为0');
+                diceResult.textContent = '0';
+            }
+        } else {
+            console.error('找不到骰子显示元素!');
         }
-    });
+        
+        // 更新UI
+        console.log('准备调用updateUI()');
+        updateUI();
+        console.log('updateUI()调用完成');
+        
+        // 如果有骰子值且未移动，重新计算可移动格子
+        if (gameState.dice_value > 0 && !gameState.moved) {
+            console.log('检测到有效的骰子值且未移动，重绘棋盘显示可移动格子');
+            drawBoard();
+            addMoveTip();
+        }
+        
+        console.log('=== 游戏状态更新处理完成 ===');
+    }
     
-    // 监听掷骰子结果
-    socket.on('dice_result', (data) => {
-        console.log('掷骰子结果:', data);
+    // 掷骰子结果事件
+    function handleDiceResult(data) {
+        console.log('!!! dice_result 事件触发 !!!');
+        console.log('收到掷骰子结果:', data);
+        
+        if (!data || !data.dice_value) {
+            console.error('掷骰子结果数据无效!');
+            return;
+        }
+        
+        // 解析骰子值并立即更新显示
+        const diceValue = parseInt(data.dice_value);
+        
+        // 立即更新显示骰子值
+        if (diceResult) {
+            console.log('直接更新骰子显示为:', diceValue);
+            diceResult.textContent = diceValue;
+        } else {
+            console.error('找不到骰子显示元素!');
+        }
+        
+        // 记录到调试对象
+        window.debugGameState.lastDiceValue = diceValue;
+        
+        // 确保gameState存在
+        if (!gameState) {
+            gameState = {
+                dice_value: 0,
+                moved: false,
+                players: []
+            };
+        }
         
         // 更新游戏状态中的骰子值
-        if (gameState) {
-            // 更新骰子值显示
-            diceResult.textContent = data.dice_value;
-            
-            // 更新游戏状态中的骰子值
-            gameState.dice_value = data.dice_value;
-            gameState.moved = false; // 重置移动状态
-            
-            // 显示移动提示
-            const currentPlayer = gameState.players[gameState.current_player];
-            showStatusMessage(`${currentPlayer.name}掷出了${data.dice_value}点，请选择高亮显示的格子进行移动`);
-            
-            // 重绘棋盘以高亮显示可移动的格子
-            drawBoard();
-            
-            // 添加移动提示
-            addMoveTip();
-            
-            // 强制更新UI显示
-            requestAnimationFrame(() => {
-                diceResult.textContent = data.dice_value;
-            });
-        } else {
-            diceResult.textContent = data.dice_value;
-            showStatusMessage(`玩家${data.player_index + 1}掷出了${data.dice_value}点`);
-        }
+        gameState.dice_value = diceValue;
+        gameState.moved = false;
         
-        // 动画效果
-        animateDice(data.dice_value);
-    });
+        // 更新当前玩家的骰子值
+        if (gameState.players && gameState.current_player !== undefined) {
+            const currentPlayer = gameState.players[gameState.current_player];
+            if (currentPlayer) {
+                currentPlayer.dice_value = diceValue;
+                
+                console.log('更新玩家骰子值:', {
+                    player_name: currentPlayer.name,
+                    dice_value: currentPlayer.dice_value
+                });
+                
+                // 显示移动提示
+                showStatusMessage(`${currentPlayer.name}掷出了${diceValue}点，请选择高亮显示的格子进行移动`);
+                
+                // 重绘棋盘以显示可移动的格子
+                drawBoard();
+                addMoveTip();
+                
+                // 执行骰子动画（但不影响已经显示的值）
+                animateDice(diceValue);
+            }
+        }
+    }
     
-    // 监听错误消息
-    socket.on('error', (data) => {
-        console.error('错误:', data.message);
-        showStatusMessage(`错误: ${data.message}`, true);
-    });
+    // 注册事件处理函数
+    console.log('注册Socket.IO事件处理函数');
+    socket.off('game_state').on('game_state', handleGameState);
+    socket.off('dice_result').on('dice_result', handleDiceResult);
     
-    // 监听成功消息
-    socket.on('success', (data) => {
+    socket.off('success').on('success', function(data) {
+        console.log('!!! success 事件触发 !!!');
         console.log('收到成功消息:', data);
         
-        if (data.message) {
+        if (data && data.message) {
             // 显示成功消息
             const isError = data.message.includes('错误') || data.message.includes('失败');
             showStatusMessage(data.message, isError);
@@ -284,316 +448,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // 播放游戏开始特效
-    function playGameStartEffect() {
-        console.log("播放游戏开始特效");
-        
-        // 添加游戏开始动画覆盖层
-        const overlay = document.createElement('div');
-        overlay.style.position = 'fixed';
-        overlay.style.top = '0';
-        overlay.style.left = '0';
-        overlay.style.width = '100%';
-        overlay.style.height = '100%';
-        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-        overlay.style.display = 'flex';
-        overlay.style.justifyContent = 'center';
-        overlay.style.alignItems = 'center';
-        overlay.style.zIndex = '9999';
-        overlay.style.opacity = '0';
-        overlay.style.transition = 'opacity 0.5s';
-        
-        const message = document.createElement('div');
-        message.textContent = '游戏正式开始！';
-        message.style.color = '#fff';
-        message.style.fontSize = '36px';
-        message.style.fontWeight = 'bold';
-        message.style.textShadow = '0 0 10px #00ff00';
-        
-        overlay.appendChild(message);
-        document.body.appendChild(overlay);
-        
-        // 显示动画
-        setTimeout(() => {
-            overlay.style.opacity = '1';
-        }, 10);
-        
-        // 3秒后移除动画
-        setTimeout(() => {
-            overlay.style.opacity = '0';
-            setTimeout(() => {
-                overlay.remove();
-            }, 500);
-        }, 3000);
-    }
+    socket.off('error').on('error', function(data) {
+        console.log('!!! error 事件触发 !!!');
+        console.error('错误:', data.message);
+        showStatusMessage(`错误: ${data.message}`, true);
+    });
     
-    // 添加移动提示文本到UI
-    function addMoveTip() {
-        // 移除旧的提示（如果有）
-        const oldTip = document.getElementById('move-tip');
-        if (oldTip) {
-            oldTip.remove();
-        }
-        
-        // 只有在掷骰子后且不在初始位置选择阶段时显示提示
-        if (gameState && !gameState.selecting_start && gameState.dice_value > 0 && !gameState.moved) {
-            const tipDiv = document.createElement('div');
-            tipDiv.id = 'move-tip';
-            tipDiv.style.position = 'fixed';
-            tipDiv.style.bottom = '10px';
-            tipDiv.style.left = '50%';
-            tipDiv.style.transform = 'translateX(-50%)';
-            tipDiv.style.background = 'rgba(0, 0, 0, 0.7)';
-            tipDiv.style.color = '#ffffff';
-            tipDiv.style.padding = '10px 20px';
-            tipDiv.style.borderRadius = '5px';
-            tipDiv.style.zIndex = '1000';
-            tipDiv.style.fontSize = '16px';
-            tipDiv.style.fontWeight = 'bold';
-            tipDiv.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.7)';
-            tipDiv.style.animation = 'pulse 2s infinite';
-            
-            // 添加CSS动画
-            const style = document.createElement('style');
-            style.textContent = `
-                @keyframes pulse {
-                    0% { box-shadow: 0 0 10px rgba(0, 255, 0, 0.7); }
-                    50% { box-shadow: 0 0 20px rgba(0, 255, 0, 1); }
-                    100% { box-shadow: 0 0 10px rgba(0, 255, 0, 0.7); }
-                }
-            `;
-            document.head.appendChild(style);
-            
-            const currentPlayer = gameState.players[gameState.current_player];
-            tipDiv.textContent = `${currentPlayer.name}请选择绿色高亮格子移动${gameState.dice_value}步`;
-            
-            document.body.appendChild(tipDiv);
-        }
-    }
-    
-    // 更新UI
-    function updateUI() {
-        if (!gameState) return;
-        
-        // 更新当前玩家信息
-        const currentPlayer = gameState.players[gameState.current_player];
-        currentPlayerName.textContent = currentPlayer.name;
-        currentPlayerName.style.color = PLAYER_COLORS[currentPlayer.id];
-        
-        // 设置当前玩家的ID
-        gameState.current_turn = currentPlayer.id;
-        
-        // 更新骰子结果（只在没有值的时候显示0）
-        if (!gameState.dice_value && gameState.dice_value !== 0) {
-            diceResult.textContent = '0';
-        }
-        
-        // 更新玩家列表
-        updatePlayersList();
-        
-        // 检查所有玩家是否都有位置
-        let allPlayersHavePositions = true;
-        for (const player of gameState.players) {
-            if (!player.position) {
-                allPlayersHavePositions = false;
-                break;
-            }
-        }
-        console.log("所有玩家都有位置:", allPlayersHavePositions);
-        
-        // 显示调试信息
-        const debugInfo = document.createElement('div');
-        debugInfo.style.position = 'fixed';
-        debugInfo.style.top = '10px';
-        debugInfo.style.left = '10px';
-        debugInfo.style.background = 'rgba(0,0,0,0.7)';
-        debugInfo.style.color = 'white';
-        debugInfo.style.padding = '10px';
-        debugInfo.style.borderRadius = '5px';
-        debugInfo.style.zIndex = '1000';
-        debugInfo.style.fontSize = '12px';
-        
-        // 收集调试信息
-        const diceValueType = typeof gameState.dice_value;
-        const diceValueDisplay = gameState.dice_value || 0;
-        
-        debugInfo.innerHTML = `
-            <div>初始位置模式: ${gameState.selecting_start} (类型: ${typeof gameState.selecting_start})</div>
-            <div>骰子值: ${diceValueDisplay} (类型: ${diceValueType})</div>
-            <div>当前玩家: ${gameState.current_player} (${currentPlayer.name})</div>
-            <div>玩家位置: ${JSON.stringify(currentPlayer.position)}</div>
-            <div>楼层: ${currentFloorValue}</div>
-        `;
-        
-        // 移除旧的调试信息
-        const oldDebug = document.getElementById('debug-info');
-        if (oldDebug) {
-            oldDebug.remove();
-        }
-        
-        // 添加新的调试信息
-        debugInfo.id = 'debug-info';
-        document.body.appendChild(debugInfo);
-        
-        // 更新游戏容器的类，标识初始位置选择状态
-        const gameContainer = document.querySelector('.game-container');
-        if (gameState.selecting_start) {
-            gameContainer.classList.add('selecting-start');
-        } else {
-            gameContainer.classList.remove('selecting-start');
-        }
-        
-        console.log("UI更新 - 状态检查:", {
-            selecting_start: gameState.selecting_start,
-            dice_value: gameState.dice_value,
-            current_player: gameState.current_player,
-            current_turn: gameState.current_turn
+    // 定时检查调试状态
+    setInterval(() => {
+        console.log('调试状态检查:', {
+            socketConnected: window.debugGameState.socketConnected,
+            eventCounts: window.debugGameState.eventCount,
+            lastDiceValue: window.debugGameState.lastDiceValue,
+            currentDiceDisplay: diceResult ? diceResult.textContent : 'element不存在'
         });
-        
-        // 绘制游戏板
-        drawBoard();
-        
-        // 更新当前楼层显示
-        currentFloor.textContent = currentFloorValue;
-        
-        // 强制转换selecting_start为布尔值
-        const isSelectingStart = Boolean(gameState.selecting_start);
-        console.log("转换后的选择初始位置状态:", isSelectingStart);
-        
-        // 根据游戏阶段设置UI状态 - 使用转换后的布尔值
-        if (isSelectingStart) {
-            // 初始位置选择阶段
-            showStatusMessage(`请为${currentPlayer.name}选择初始位置，点击棋盘上的有效格子放置`);
-            
-            // 禁用游戏按钮
-            rollDiceBtn.disabled = true;
-            rotateBtn.disabled = true;
-            placeBtn.disabled = true;
-            increaseDazeBtn.disabled = true;
-            decreaseDazeBtn.disabled = true;
-            endTurnBtn.disabled = true;
-            
-            rollDiceBtn.style.opacity = '0.5';
-            rotateBtn.style.opacity = '0.5';
-            placeBtn.style.opacity = '0.5';
-            increaseDazeBtn.style.opacity = '0.5';
-            decreaseDazeBtn.style.opacity = '0.5';
-            endTurnBtn.style.opacity = '0.5';
-            
-            console.log("初始位置阶段 - 按钮已禁用", {
-                rollDice: rollDiceBtn.disabled,
-                rotate: rotateBtn.disabled,
-                place: placeBtn.disabled,
-                increaseDaze: increaseDazeBtn.disabled,
-                decreaseDaze: decreaseDazeBtn.disabled,
-                endTurn: endTurnBtn.disabled
-            });
-        } else {
-            // 常规游戏阶段
-            // 启用游戏按钮
-            rollDiceBtn.disabled = false;
-            rotateBtn.disabled = false;
-            placeBtn.disabled = false;
-            increaseDazeBtn.disabled = false;
-            decreaseDazeBtn.disabled = false;
-            endTurnBtn.disabled = false;
-            
-            rollDiceBtn.style.opacity = '1';
-            rotateBtn.style.opacity = '1';
-            placeBtn.style.opacity = '1';
-            increaseDazeBtn.style.opacity = '1';
-            decreaseDazeBtn.style.opacity = '1';
-            endTurnBtn.style.opacity = '1';
-            
-            console.log("游戏阶段 - 按钮已启用", {
-                rollDice: !rollDiceBtn.disabled,
-                rotate: !rotateBtn.disabled,
-                place: !placeBtn.disabled,
-                increaseDaze: !increaseDazeBtn.disabled,
-                decreaseDaze: !decreaseDazeBtn.disabled,
-                endTurn: !endTurnBtn.disabled
-            });
-            
-            // 根据是否已经掷骰子来显示提示
-            if (gameState.dice_value > 0) {
-                showStatusMessage(`${currentPlayer.name}掷出了${gameState.dice_value}点，请选择绿色高亮格子进行移动`);
-            } else {
-                showStatusMessage(`${currentPlayer.name}的回合，请掷骰子`);
-            }
-        }
-        
-        // 添加移动提示
-        addMoveTip();
-    }
-    
-    // 更新玩家列表
-    function updatePlayersList() {
-        playersContainer.innerHTML = '';
-        
-        gameState.players.forEach((player, index) => {
-            const playerItem = document.createElement('li');
-            playerItem.className = 'player-item';
-            if (index === gameState.current_player) {
-                playerItem.classList.add('current');
-            }
-            
-            const nameContainer = document.createElement('div');
-            nameContainer.className = 'player-name-container';
-            
-            const colorSpan = document.createElement('span');
-            colorSpan.className = 'player-color';
-            colorSpan.style.backgroundColor = PLAYER_COLORS[player.id];
-            
-            const nameSpan = document.createElement('span');
-            nameSpan.textContent = player.name;
-            
-            nameContainer.appendChild(colorSpan);
-            nameContainer.appendChild(nameSpan);
-            
-            const statsSpan = document.createElement('span');
-            statsSpan.className = 'player-stats';
-            
-            // 显示玩家的位置信息
-            let posText = "未设置";
-            if (player.position !== null && player.position !== undefined) {
-                console.log(`处理玩家${player.name}的位置显示, 原始数据:`, player.position);
-                
-                let x, y;
-                if (Array.isArray(player.position)) {
-                    [x, y] = player.position;
-                    posText = `(${x},${y})`;
-                    console.log(`数组形式位置: (${x},${y})`);
-                } else if (typeof player.position === 'object' && player.position !== null) {
-                    // 如果是tuple形式的对象 {0: x, 1: y}
-                    x = player.position[0];
-                    y = player.position[1];
-                    posText = `(${x},${y})`;
-                    console.log(`对象形式位置: (${x},${y})`);
-                } else if (typeof player.position === 'string') {
-                    // 如果是字符串表示的坐标，例如 "(x,y)"
-                    posText = player.position;
-                    console.log(`字符串形式位置: ${player.position}`);
-                } else {
-                    // 未知形式，显示原始值
-                    posText = `${player.position}`;
-                    console.log(`未知形式位置: ${player.position}, 类型: ${typeof player.position}`);
-                }
-            } else {
-                console.log(`玩家${player.name}没有位置信息`);
-            }
-            
-            statsSpan.textContent = `位置: ${posText} 楼层: ${player.floor} 迷惑: ${player.daze}`;
-            
-            playerItem.appendChild(nameContainer);
-            playerItem.appendChild(statsSpan);
-            playersContainer.appendChild(playerItem);
-        });
-    }
+    }, 10000); // 每10秒检查一次
     
     // 绘制游戏板
     function drawBoard() {
         // 清空画布
         ctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+        console.log('开始绘制棋盘...');
         
         // 绘制网格
         const offsetX = (gameCanvas.width - BOARD_SIZE * TILE_SIZE) / 2;
@@ -623,27 +498,37 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.stroke();
         }
         
-        // 检查当前玩家位置和骰子值，打印调试信息
-        if (gameState) {
-            console.log("当前游戏状态:", {
-                selecting_start: gameState.selecting_start,
-                dice_value: gameState.dice_value,
-                current_player: gameState.current_player
-            });
+        if (!gameState) {
+            console.log('绘制基本棋盘完成 (无游戏状态)');
+            return;
+        }
+        
+        // 如果没有棋盘数据，给出警告并返回
+        if (!gameState.board || !gameState.board.floors) {
+            console.error('警告: gameState中没有棋盘数据!');
+            
+            // 绘制一个简单的错误提示在棋盘中央
+            ctx.fillStyle = 'red';
+            ctx.font = '20px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('棋盘数据加载错误!', gameCanvas.width / 2, gameCanvas.height / 2);
+            return;
+        }
+        
+        console.log(`绘制棋盘内容 - 楼层: ${currentFloorValue}`);
+        
+        // 计算可移动的格子
+        let movableTiles = [];
+        
+        // 骰子值大于0，不在初始位置选择阶段，且本回合未移动
+        if (!gameState.selecting_start && gameState.dice_value > 0 && !gameState.moved) {
+            const diceValue = parseInt(gameState.dice_value);
+            
+            console.log(`计算可移动格子 - 骰子值: ${diceValue}, 移动状态: ${gameState.moved}`);
             
             const currentPlayer = gameState.players[gameState.current_player];
             if (currentPlayer && currentPlayer.position) {
-                console.log(`当前玩家 ${currentPlayer.name} 位置:`, currentPlayer.position);
-            }
-        }
-        
-        // 计算可移动的格子（如果掷了骰子且不在初始位置选择阶段）
-        let movableTiles = [];
-        if (gameState && !gameState.selecting_start && gameState.dice_value > 0) {
-            console.log("检测到骰子值 > 0，计算可移动格子");
-            const currentPlayer = gameState.players[gameState.current_player];
-            if (currentPlayer && currentPlayer.position) {
-                // 获取当前玩家位置
                 let currentX, currentY;
                 if (Array.isArray(currentPlayer.position)) {
                     [currentX, currentY] = currentPlayer.position;
@@ -653,22 +538,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 if (currentX !== undefined && currentY !== undefined) {
-                    const diceValue = gameState.dice_value;
-                    console.log(`计算从(${currentX},${currentY})可移动${diceValue}步的格子`);
+                    console.log(`从位置(${currentX},${currentY})计算${diceValue}步可达的格子`);
                     
-                    // 计算曼哈顿距离恰好等于骰子点数的所有可能格子
+                    // 计算曼哈顿距离等于骰子值的所有格子
                     for (let x = Math.max(0, currentX - diceValue); x <= Math.min(BOARD_SIZE - 1, currentX + diceValue); x++) {
                         for (let y = Math.max(0, currentY - diceValue); y <= Math.min(BOARD_SIZE - 1, currentY + diceValue); y++) {
                             const manhattanDistance = Math.abs(x - currentX) + Math.abs(y - currentY);
                             if (manhattanDistance === diceValue) {
-                                // 检查该格子是否有效（有路径）
-                                const isValid = isValidTile(x, y);
-                                if (isValid) {
-                                    // 检查该格子是否已被其他玩家占用
-                                    const isOccupied = isOccupiedTile(x, y);
-                                    if (!isOccupied) {
-                                        movableTiles.push([x, y]);
-                                    }
+                                if (isValidTile(x, y) && !isOccupiedTile(x, y)) {
+                                    movableTiles.push([x, y]);
                                 }
                             }
                         }
@@ -680,85 +558,69 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         // 绘制棋盘瓦片
-        if (gameState && gameState.board && gameState.board.floors) {
-            const floorTiles = gameState.board.floors[currentFloorValue];
-            if (floorTiles) {
-                floorTiles.forEach(tile => {
-                    const x = tile.x;
-                    const y = tile.y;
-                    
-                    // 根据瓦片状态设置颜色
-                    let tileColor;
-                    
-                    // 简化UI，使用固定颜色，不再使用动画效果
-                    if (gameState.selecting_start && tile.status) {
-                        // 初始位置选择阶段的白色瓦片
-                        tileColor = '#ffffff';  // 纯白色
-                    } else {
-                        switch (tile.status) {
-                            case 1: // 普通路径
-                                tileColor = '#8a8aa5';
-                                break;
-                            case 2: // 特殊路径
-                                tileColor = '#c4c4e0';
-                                break;
-                            case 3: // 可购买地块
-                                tileColor = '#ffd700'; // 金色
-                                break;
-                            default:
-                                tileColor = '#5a5a77';
-                        }
+        const floorTiles = gameState.board.floors[currentFloorValue];
+        if (floorTiles) {
+            console.log(`绘制楼层${currentFloorValue}的瓦片 - 数量: ${floorTiles.length}`);
+            floorTiles.forEach(tile => {
+                const x = tile.x;
+                const y = tile.y;
+                
+                // 根据瓦片状态设置颜色
+                let tileColor;
+                
+                if (gameState.selecting_start && tile.status) {
+                    // 初始位置选择阶段的白色瓦片
+                    tileColor = '#ffffff';  // 纯白色
+                } else {
+                    switch (tile.status) {
+                        case 1: // 普通路径
+                            tileColor = '#8a8aa5';
+                            break;
+                        case 2: // 特殊路径
+                            tileColor = '#c4c4e0';
+                            break;
+                        case 3: // 可购买地块
+                            tileColor = '#ffd700'; // 金色
+                            break;
+                        default:
+                            tileColor = '#5a5a77';
                     }
-                    
-                    // 检查是否是可移动的格子
-                    const isMovable = movableTiles.some(pos => pos[0] === x && pos[1] === y);
-                    if (isMovable) {
-                        // 高亮显示可移动的格子
-                        tileColor = '#66ff66'; // 亮绿色
-                    }
-                    
-                    // 绘制瓦片
-                    ctx.fillStyle = tileColor;
-                    ctx.fillRect(
-                        offsetX + x * TILE_SIZE + 1, 
-                        offsetY + y * TILE_SIZE + 1, 
-                        TILE_SIZE - 2, 
-                        TILE_SIZE - 2
+                }
+                
+                // 检查是否是可移动的格子 - 使用some方法更安全
+                const isMovable = movableTiles.some(pos => pos[0] === x && pos[1] === y);
+                
+                if (isMovable) {
+                    // 高亮显示可移动的格子
+                    tileColor = '#66ff66'; // 亮绿色
+                }
+                
+                // 绘制瓦片
+                ctx.fillStyle = tileColor;
+                ctx.fillRect(
+                    offsetX + x * TILE_SIZE + 1, 
+                    offsetY + y * TILE_SIZE + 1, 
+                    TILE_SIZE - 2, 
+                    TILE_SIZE - 2
+                );
+                
+                // 如果是可移动的格子，添加特殊标记
+                if (isMovable) {
+                    // 绘制一个圆形标记
+                    ctx.fillStyle = '#33cc33';  // 深绿色
+                    ctx.beginPath();
+                    ctx.arc(
+                        offsetX + (x + 0.5) * TILE_SIZE,
+                        offsetY + (y + 0.5) * TILE_SIZE,
+                        TILE_SIZE / 4,
+                        0,
+                        Math.PI * 2
                     );
-                    
-                    // 如果是可移动的格子，添加特殊标记
-                    if (isMovable) {
-                        // 绘制一个圆形标记
-                        ctx.fillStyle = '#33cc33';  // 深绿色
-                        ctx.beginPath();
-                        ctx.arc(
-                            offsetX + (x + 0.5) * TILE_SIZE,
-                            offsetY + (y + 0.5) * TILE_SIZE,
-                            TILE_SIZE / 4,
-                            0,
-                            Math.PI * 2
-                        );
-                        ctx.fill();
-                        
-                        // 添加脉动动画效果
-                        const animPhase = (Date.now() % 2000) / 2000;  // 0到1之间的值，循环
-                        const pulseSize = TILE_SIZE / 3 + Math.sin(animPhase * Math.PI * 2) * TILE_SIZE / 10;
-                        
-                        // 绘制闪烁的外环
-                        ctx.strokeStyle = '#4caf50';
-                        ctx.lineWidth = 2;
-                        ctx.beginPath();
-                        ctx.arc(
-                            offsetX + (x + 0.5) * TILE_SIZE,
-                            offsetY + (y + 0.5) * TILE_SIZE,
-                            pulseSize,
-                            0,
-                            Math.PI * 2
-                        );
-                        ctx.stroke();
-                    }
-                });
-            }
+                    ctx.fill();
+                }
+            });
+        } else {
+            console.error(`当前楼层${currentFloorValue}没有瓦片数据!`);
         }
         
         // 绘制选中的瓦片
@@ -775,7 +637,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         // 绘制鼠标悬停的瓦片
-        if (hoverTile && gameState) {
+        if (hoverTile) {
             const [x, y] = hoverTile;
             
             // 检查是否是可移动的格子
@@ -793,71 +655,72 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         // 绘制玩家标记
-        gameState.players.forEach(player => {
-            // 检查玩家位置是否有效
-            if (player.position !== null && player.position !== undefined && player.floor === currentFloorValue) {
-                // 确保位置是数组形式
-                let x, y;
-                if (Array.isArray(player.position)) {
-                    [x, y] = player.position;
-                } else if (typeof player.position === 'object' && player.position !== null) {
-                    // 如果是tuple形式的对象 {0: x, 1: y}
-                    x = player.position[0];
-                    y = player.position[1];
-                }
-                
-                // 如果坐标有效，则绘制玩家标记
-                if (x !== undefined && y !== undefined) {
-                    // 打印调试信息
-                    console.log(`绘制玩家${player.id+1}的标记，位置: (${x},${y}), 楼层: ${player.floor}`);
-                    
-                    // 判断是否是当前玩家
-                    const isCurrentPlayer = player.id === gameState.players[gameState.current_player].id;
-                    
-                    // 如果是当前玩家，绘制一个闪烁的光环
-                    if (isCurrentPlayer) {
-                        const animPhase = (Date.now() % 1500) / 1500;  // 0到1之间的值，循环
-                        const haloSize = TILE_SIZE / 2 + Math.sin(animPhase * Math.PI * 2) * TILE_SIZE / 10;
-                        
-                        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-                        ctx.beginPath();
-                        ctx.arc(
-                            offsetX + (x + 0.5) * TILE_SIZE,
-                            offsetY + (y + 0.5) * TILE_SIZE,
-                            haloSize,
-                            0,
-                            Math.PI * 2
-                        );
-                        ctx.fill();
+        if (gameState.players) {
+            gameState.players.forEach(player => {
+                // 检查玩家位置是否有效
+                if (player.position !== null && player.position !== undefined && player.floor === currentFloorValue) {
+                    // 确保位置是数组形式
+                    let x, y;
+                    if (Array.isArray(player.position)) {
+                        [x, y] = player.position;
+                    } else if (typeof player.position === 'object' && player.position !== null) {
+                        // 如果是tuple形式的对象 {0: x, 1: y}
+                        x = player.position[0];
+                        y = player.position[1];
                     }
                     
-                    ctx.fillStyle = PLAYER_COLORS[player.id];
-                    ctx.beginPath();
-                    ctx.arc(
-                        offsetX + (x + 0.5) * TILE_SIZE, 
-                        offsetY + (y + 0.5) * TILE_SIZE, 
-                        TILE_SIZE / 3, 0, Math.PI * 2
-                    );
-                    ctx.fill();
-                    
-                    // 玩家ID
-                    ctx.fillStyle = '#ffffff';
-                    ctx.font = '12px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.textBaseline = 'middle';
-                    ctx.fillText(
-                        player.id + 1,
-                        offsetX + (x + 0.5) * TILE_SIZE,
-                        offsetY + (y + 0.5) * TILE_SIZE
-                    );
+                    // 如果坐标有效，则绘制玩家标记
+                    if (x !== undefined && y !== undefined) {
+                        // 判断是否是当前玩家
+                        const isCurrentPlayer = player.id === gameState.players[gameState.current_player].id;
+                        
+                        // 如果是当前玩家，绘制一个闪烁的光环
+                        if (isCurrentPlayer) {
+                            const animPhase = (Date.now() % 1500) / 1500;  // 0到1之间的值，循环
+                            const haloSize = TILE_SIZE / 2 + Math.sin(animPhase * Math.PI * 2) * TILE_SIZE / 10;
+                            
+                            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                            ctx.beginPath();
+                            ctx.arc(
+                                offsetX + (x + 0.5) * TILE_SIZE,
+                                offsetY + (y + 0.5) * TILE_SIZE,
+                                haloSize,
+                                0,
+                                Math.PI * 2
+                            );
+                            ctx.fill();
+                        }
+                        
+                        ctx.fillStyle = PLAYER_COLORS[player.id];
+                        ctx.beginPath();
+                        ctx.arc(
+                            offsetX + (x + 0.5) * TILE_SIZE, 
+                            offsetY + (y + 0.5) * TILE_SIZE, 
+                            TILE_SIZE / 3, 0, Math.PI * 2
+                        );
+                        ctx.fill();
+                        
+                        // 玩家ID
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = '12px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(
+                            player.id + 1,
+                            offsetX + (x + 0.5) * TILE_SIZE,
+                            offsetY + (y + 0.5) * TILE_SIZE
+                        );
+                    }
                 }
-            }
-        });
+            });
+        }
         
         // 请求下一帧绘制（让动画持续运行）
         if (!gameState.selecting_start && gameState.dice_value > 0 && movableTiles.length > 0) {
             requestAnimationFrame(drawBoard);
         }
+        
+        console.log('绘制棋盘完成');
     }
     
     // 检查格子是否有效（有路径）
@@ -903,27 +766,36 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     
-    // 骰子动画
-    function animateDice(finalValue) {
-        let count = 0;
-        const animValues = [];
-        
-        // 生成随机动画值
-        for (let i = 0; i < 10; i++) {
-            animValues.push(Math.floor(Math.random() * 6) + 1);
+    // 添加移动提示文本到UI
+    function addMoveTip() {
+        // 移除旧的提示（如果有）
+        const oldTip = document.getElementById('move-tip');
+        if (oldTip) {
+            oldTip.remove();
         }
         
-        // 末尾添加最终值
-        animValues.push(finalValue);
-        
-        const interval = setInterval(() => {
-            diceResult.textContent = animValues[count];
-            count++;
+        // 只有在掷骰子后且不在初始位置选择阶段时显示提示
+        if (gameState && !gameState.selecting_start && gameState.dice_value > 0 && !gameState.moved) {
+            const tipDiv = document.createElement('div');
+            tipDiv.id = 'move-tip';
+            tipDiv.style.position = 'fixed';
+            tipDiv.style.bottom = '10px';
+            tipDiv.style.left = '50%';
+            tipDiv.style.transform = 'translateX(-50%)';
+            tipDiv.style.background = 'rgba(0, 0, 0, 0.7)';
+            tipDiv.style.color = '#ffffff';
+            tipDiv.style.padding = '10px 20px';
+            tipDiv.style.borderRadius = '5px';
+            tipDiv.style.zIndex = '1000';
+            tipDiv.style.fontSize = '16px';
+            tipDiv.style.fontWeight = 'bold';
+            tipDiv.style.boxShadow = '0 0 10px rgba(0, 255, 0, 0.7)';
             
-            if (count >= animValues.length) {
-                clearInterval(interval);
-            }
-        }, 100);
+            const currentPlayer = gameState.players[gameState.current_player];
+            tipDiv.textContent = `${currentPlayer.name}请选择绿色高亮格子移动${gameState.dice_value}步`;
+            
+            document.body.appendChild(tipDiv);
+        }
     }
     
     // 显示状态提示
@@ -943,6 +815,233 @@ document.addEventListener('DOMContentLoaded', () => {
         }, duration);
     }
     
+    // 骰子动画 - 修改为不会覆盖实际显示的值
+    function animateDice(finalValue) {
+        console.log(`开始骰子动画，最终值: ${finalValue}`);
+        // 创建一个动画元素，不直接修改diceResult
+        const animElement = document.createElement('div');
+        animElement.style.position = 'absolute';
+        animElement.style.top = '0';
+        animElement.style.left = '0';
+        animElement.style.width = '100%';
+        animElement.style.height = '100%';
+        animElement.style.display = 'flex';
+        animElement.style.justifyContent = 'center';
+        animElement.style.alignItems = 'center';
+        animElement.style.fontSize = '24px';
+        animElement.style.fontWeight = 'bold';
+        animElement.style.color = 'white';
+        animElement.style.zIndex = '999';
+        animElement.style.pointerEvents = 'none'; // 不阻止点击
+        
+        // 将动画元素添加到body
+        document.body.appendChild(animElement);
+        
+        let count = 0;
+        const animValues = [];
+        
+        // 生成随机动画值
+        for (let i = 0; i < 10; i++) {
+            animValues.push(Math.floor(Math.random() * 6) + 1);
+        }
+        
+        // 末尾添加最终值确保显示正确
+        animValues.push(finalValue);
+        
+        const interval = setInterval(() => {
+            if (count >= animValues.length) {
+                clearInterval(interval);
+                // 动画结束，移除元素
+                animElement.remove();
+                
+                // 确认骰子值显示正确
+                console.log(`确认diceResult显示值为${finalValue}`);
+                diceResult.textContent = finalValue;
+            } else {
+                animElement.textContent = animValues[count];
+                count++;
+            }
+        }, 100);
+    }
+    
+    // 更新UI
+    function updateUI() {
+        if (!gameState) {
+            console.log('updateUI: gameState不存在，退出');
+            return;
+        }
+        
+        // 更新当前玩家信息
+        const currentPlayer = gameState.players[gameState.current_player];
+        currentPlayerName.textContent = currentPlayer.name;
+        currentPlayerName.style.color = PLAYER_COLORS[currentPlayer.id];
+        
+        // 设置当前玩家的ID
+        gameState.current_turn = currentPlayer.id;
+        
+        // 调试输出当前骰子值
+        console.log('updateUI中的骰子值:', gameState.dice_value, '类型:', typeof gameState.dice_value);
+        
+        // 确保当前楼层与游戏状态同步
+        currentFloorValue = gameState.current_floor || 1;
+        currentFloor.textContent = currentFloorValue;
+        
+        // 检查是否需要更新骰子显示
+        if (gameState.dice_value === 0 || gameState.dice_value === undefined || gameState.dice_value === null) {
+            console.log('重置骰子显示为0 (原值为:', diceResult.textContent, ')');
+            diceResult.textContent = '0';
+        } else if (parseInt(diceResult.textContent) !== gameState.dice_value) {
+            console.log(`更新骰子显示从 ${diceResult.textContent} 到 ${gameState.dice_value}`);
+            diceResult.textContent = gameState.dice_value;
+        } else {
+            console.log('骰子显示无需更新，当前值:', diceResult.textContent);
+        }
+        
+        // 更新玩家列表
+        updatePlayersList();
+        
+        // 根据游戏阶段设置UI状态
+        if (gameState.selecting_start) {
+            // 初始位置选择阶段
+            showStatusMessage(`请为${currentPlayer.name}选择初始位置，点击棋盘上的有效格子放置`);
+            
+            // 禁用游戏按钮
+            rollDiceBtn.disabled = true;
+            rotateBtn.disabled = true;
+            placeBtn.disabled = true;
+            increaseDazeBtn.disabled = true;
+            decreaseDazeBtn.disabled = true;
+            endTurnBtn.disabled = true;
+        } else {
+            // 常规游戏阶段
+            // 启用游戏按钮
+            rollDiceBtn.disabled = false;
+            rotateBtn.disabled = false;
+            placeBtn.disabled = false;
+            increaseDazeBtn.disabled = false;
+            decreaseDazeBtn.disabled = false;
+            endTurnBtn.disabled = false;
+            
+            // 根据是否已经掷骰子来显示提示
+            if (gameState.dice_value > 0) {
+                showStatusMessage(`${currentPlayer.name}掷出了${gameState.dice_value}点，请选择绿色高亮格子进行移动`);
+            } else {
+                showStatusMessage(`${currentPlayer.name}的回合，请掷骰子`);
+            }
+        }
+        
+        // 绘制游戏板
+        drawBoard();
+    }
+    
+    // 更新玩家列表
+    function updatePlayersList() {
+        playersContainer.innerHTML = '';
+        
+        gameState.players.forEach((player, index) => {
+            const playerItem = document.createElement('li');
+            playerItem.className = 'player-item';
+            if (index === gameState.current_player) {
+                playerItem.classList.add('current');
+            }
+            
+            const nameContainer = document.createElement('div');
+            nameContainer.className = 'player-name-container';
+            
+            const colorSpan = document.createElement('span');
+            colorSpan.className = 'player-color';
+            colorSpan.style.backgroundColor = PLAYER_COLORS[player.id];
+            
+            const nameSpan = document.createElement('span');
+            nameSpan.textContent = player.name;
+            
+            nameContainer.appendChild(colorSpan);
+            nameContainer.appendChild(nameSpan);
+            
+            const statsSpan = document.createElement('span');
+            statsSpan.className = 'player-stats';
+            
+            // 显示玩家的位置信息和骰子值
+            let posText = "未设置";
+            if (player.position !== null && player.position !== undefined) {
+                let x, y;
+                if (Array.isArray(player.position)) {
+                    [x, y] = player.position;
+                    posText = `(${x},${y})`;
+                } else if (typeof player.position === 'object' && player.position !== null) {
+                    x = player.position[0];
+                    y = player.position[1];
+                    posText = `(${x},${y})`;
+                } else if (typeof player.position === 'string') {
+                    posText = player.position;
+                }
+            }
+            
+            statsSpan.textContent = `位置: ${posText} 楼层: ${player.floor} 迷惑: ${player.daze} 骰子值: ${player.dice_value || 0}`;
+            
+            playerItem.appendChild(nameContainer);
+            playerItem.appendChild(statsSpan);
+            playersContainer.appendChild(playerItem);
+        });
+    }
+    
+    // 播放游戏开始特效
+    function playGameStartEffect() {
+        console.log("播放游戏开始特效");
+        
+        // 添加游戏开始动画覆盖层
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+        overlay.style.display = 'flex';
+        overlay.style.justifyContent = 'center';
+        overlay.style.alignItems = 'center';
+        overlay.style.zIndex = '9999';
+        overlay.style.opacity = '0';
+        overlay.style.transition = 'opacity 0.5s';
+        
+        const message = document.createElement('div');
+        message.textContent = '游戏正式开始！';
+        message.style.color = '#fff';
+        message.style.fontSize = '36px';
+        message.style.fontWeight = 'bold';
+        message.style.textShadow = '0 0 10px #00ff00';
+        
+        overlay.appendChild(message);
+        document.body.appendChild(overlay);
+        
+        // 显示动画
+        setTimeout(() => {
+            overlay.style.opacity = '1';
+        }, 10);
+        
+        // 3秒后移除动画
+        setTimeout(() => {
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                overlay.remove();
+            }, 500);
+        }, 3000);
+    }
+
+    // 添加一个全局调试函数
+    window.debugDice = function(value) {
+        console.log(`手动设置骰子值为: ${value}`);
+        if (diceResult) {
+            diceResult.textContent = value;
+            if (gameState) {
+                gameState.dice_value = parseInt(value);
+                console.log('更新gameState骰子值为:', gameState.dice_value);
+                drawBoard();
+                addMoveTip();
+            }
+        }
+    };
+    
     // 获取鼠标在棋盘上的位置
     function getBoardPosition(e) {
         const rect = gameCanvas.getBoundingClientRect();
@@ -960,13 +1059,40 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     }
     
+    // 添加调试按钮
+    const debugPanel = document.createElement('div');
+    debugPanel.style.position = 'fixed';
+    debugPanel.style.top = '10px';
+    debugPanel.style.right = '10px';
+    debugPanel.style.background = 'rgba(0,0,0,0.7)';
+    debugPanel.style.padding = '10px';
+    debugPanel.style.borderRadius = '5px';
+    debugPanel.style.zIndex = '9999';
+    
+    const debugBtn = document.createElement('button');
+    debugBtn.textContent = '强制更新骰子(3)';
+    debugBtn.onclick = function() { window.debugDice(3); };
+    
+    const refreshBtn = document.createElement('button');
+    refreshBtn.textContent = '强制刷新UI';
+    refreshBtn.onclick = function() { 
+        if (gameState) {
+            console.log('强制刷新UI');
+            updateUI();
+            drawBoard();
+        }
+    };
+    
+    debugPanel.appendChild(debugBtn);
+    debugPanel.appendChild(refreshBtn);
+    document.body.appendChild(debugPanel);
+    
     // 处理棋盘点击
     gameCanvas.addEventListener('click', (e) => {
         const position = getBoardPosition(e);
         if (!position) return;
         
         const [x, y] = position;
-        console.log(`点击位置: (${x}, ${y})`);
         
         if (gameState && gameState.selecting_start) {
             // 初始位置选择模式
@@ -975,17 +1101,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 position: position
             });
             showStatusMessage(`正在为玩家${currentPlayer.name}设置初始位置为(${x}, ${y})...`);
-        } else if (isPlaceMode) {
-            // 放置卡片模式
-            socket.emit('place_card', {
-                position: position
-            });
-            showStatusMessage(`尝试在位置(${x}, ${y})放置卡片`);
-            isPlaceMode = false; // 重置模式
-            placeBtn.classList.remove('active');
-        } else if (gameState && gameState.dice_value > 0) {
-            // 移动玩家模式 - 只有掷骰子后才能移动
-            // 检查是否是可移动的格子（曼哈顿距离等于骰子点数的格子）
+        } else if (gameState && gameState.players[gameState.current_player].dice_value > 0) {
+            // 移动玩家模式 - 只有有剩余骰子值时才能移动
             const currentPlayer = gameState.players[gameState.current_player];
             if (currentPlayer && currentPlayer.position) {
                 // 获取当前玩家位置
@@ -998,12 +1115,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 
                 if (currentX !== undefined && currentY !== undefined) {
-                    const diceValue = gameState.dice_value;
                     const manhattanDistance = Math.abs(x - currentX) + Math.abs(y - currentY);
                     
-                    console.log(`当前位置(${currentX},${currentY})到目标位置(${x},${y})的曼哈顿距离: ${manhattanDistance}, 骰子点数: ${diceValue}`);
+                    console.log('移动检查:', {
+                        from: [currentX, currentY],
+                        to: [x, y],
+                        distance: manhattanDistance,
+                        remaining_dice: currentPlayer.dice_value
+                    });
                     
-                    if (manhattanDistance === diceValue) {
+                    if (manhattanDistance === currentPlayer.dice_value) {
                         // 检查该格子是否有效（有路径）
                         const isValid = isValidTile(x, y);
                         if (isValid) {
@@ -1011,148 +1132,36 @@ document.addEventListener('DOMContentLoaded', () => {
                             const isOccupied = isOccupiedTile(x, y);
                             if (!isOccupied) {
                                 // 可以移动
-                                selectedTile = position;
-                                socket.emit('move_player', {
-                                    position: position
+                                console.log('发送移动请求:', {
+                                    position: [x, y],
+                                    distance: manhattanDistance
                                 });
-                                showStatusMessage(`尝试移动到位置(${x}, ${y})`);
-                                drawBoard(); // 重绘以显示选中效果
+                                
+                                socket.emit('move_player', {
+                                    position: [x, y]
+                                });
+                                
+                                // 更新本地状态
+                                currentPlayer.dice_value = 0;
+                                gameState.dice_value = 0;
+                                gameState.moved = true;
+                                selectedTile = position;
+                                showStatusMessage(`移动到位置(${x}, ${y})`);
+                                drawBoard();
                             } else {
-                                showStatusMessage('该位置已被其他玩家占用，不能移动到此处', true);
+                                showStatusMessage('该位置已被其他玩家占用', true);
                             }
                         } else {
-                            showStatusMessage('该位置不是有效的瓦片，不能移动到此处', true);
+                            showStatusMessage('无效的移动位置，该位置没有路径', true);
                         }
                     } else {
-                        showStatusMessage(`移动距离必须等于骰子点数${diceValue}，当前选择的移动距离为${manhattanDistance}`, true);
+                        showStatusMessage(`移动距离必须等于骰子值${currentPlayer.dice_value}，当前距离为${manhattanDistance}`, true);
                     }
                 }
             }
         } else {
-            // 没有掷骰子，不能移动
             showStatusMessage('请先掷骰子', true);
         }
-    });
-    
-    // 掷骰子按钮点击事件
-    rollDiceBtn.addEventListener('click', () => {
-        console.log('点击掷骰子按钮, 游戏状态:', gameState);
-        
-        if (!gameState) {
-            showStatusMessage('游戏状态未初始化', true);
-            return;
-        }
-        
-        // 如果处于选择初始位置阶段，检查剩余玩家并提示
-        if (gameState.selecting_start) {
-            const remainingPlayers = gameState.players.filter(player => !player.position).map(p => p.name).join('、');
-            
-            // 检查是否所有玩家都有位置
-            let allPlayersHavePositions = true;
-            for (const player of gameState.players) {
-                if (!player.position) {
-                    allPlayersHavePositions = false;
-                    break;
-                }
-            }
-            
-            if (allPlayersHavePositions) {
-                console.log("检测到所有玩家都有位置，尝试强制开始游戏");
-                showStatusMessage('检测到所有玩家都有位置，尝试强制开始游戏...');
-                
-                // 如果所有玩家都有位置，强制开始游戏
-                socket.emit('roll_dice', {
-                    force_start: true
-                });
-                console.log('发送强制开始游戏请求');
-                
-                // 为防止多次点击，暂时禁用按钮
-                rollDiceBtn.disabled = true;
-                setTimeout(() => {
-                    rollDiceBtn.disabled = false;
-                }, 3000);
-                
-                return;
-            }
-            
-            showStatusMessage(`游戏处于初始位置选择阶段，请先为以下玩家选择起始位置: ${remainingPlayers}`, true);
-            console.log('仍需选择初始位置的玩家:', remainingPlayers);
-            return;
-        }
-        
-        // 获取玩家ID，如果存储中有就使用，否则默认为0
-        const playerId = parseInt(localStorage.getItem('playerId') || '0');
-        console.log(`当前玩家ID: ${playerId}, 当前回合玩家ID: ${gameState.current_turn}, 当前玩家索引: ${gameState.current_player}`);
-        
-        // 注释掉玩家ID检查，暂时允许任何人掷骰子
-        /*
-        if (gameState.current_turn !== playerId) {
-            showStatusMessage('不是你的回合', true);
-            return;
-        }
-        */
-        
-        if (gameState.dice_value > 0) {
-            showStatusMessage('已经掷过骰子，请先移动', true);
-            return;
-        }
-        
-        console.log('发送掷骰子请求');
-        socket.emit('roll_dice', {});
-        showStatusMessage('掷骰子中...');
-    });
-    
-    // 向上按钮点击事件
-    floorUpBtn.addEventListener('click', () => {
-        if (currentFloorValue < 5) { // 假设最大楼层为5
-            currentFloorValue++;
-            currentFloor.textContent = currentFloorValue;
-            socket.emit('change_floor', { floor: currentFloorValue });
-            showStatusMessage(`切换到第${currentFloorValue}层`);
-            drawBoard();
-        }
-    });
-    
-    // 向下按钮点击事件
-    floorDownBtn.addEventListener('click', () => {
-        if (currentFloorValue > 1) {
-            currentFloorValue--;
-            currentFloor.textContent = currentFloorValue;
-            socket.emit('change_floor', { floor: currentFloorValue });
-            showStatusMessage(`切换到第${currentFloorValue}层`);
-            drawBoard();
-        }
-    });
-    
-    // 旋转按钮点击事件
-    rotateBtn.addEventListener('click', () => {
-        socket.emit('rotate_card');
-        showStatusMessage('旋转卡片');
-    });
-    
-    // 放置按钮点击事件
-    placeBtn.addEventListener('click', () => {
-        isPlaceMode = !isPlaceMode;
-        
-        if (isPlaceMode) {
-            placeBtn.classList.add('active');
-            showStatusMessage('请点击棋盘上的位置放置卡片');
-        } else {
-            placeBtn.classList.remove('active');
-            showStatusMessage('已取消放置模式');
-        }
-    });
-    
-    // 增加迷惑值按钮点击事件
-    increaseDazeBtn.addEventListener('click', () => {
-        socket.emit('change_daze', { change: 1 });
-        showStatusMessage('增加迷惑值');
-    });
-    
-    // 减少迷惑值按钮点击事件
-    decreaseDazeBtn.addEventListener('click', () => {
-        socket.emit('change_daze', { change: -1 });
-        showStatusMessage('减少迷惑值');
     });
     
     // 鼠标移动事件处理
@@ -1179,8 +1188,154 @@ document.addEventListener('DOMContentLoaded', () => {
         drawBoard();
     });
     
+    // 掷骰子按钮点击事件 - 增加更多日志和错误捕获
+    rollDiceBtn.addEventListener('click', () => {
+        console.log('=== 点击掷骰子按钮 ===');
+        console.log('当前游戏状态:', gameState);
+        
+        try {
+            if (!gameState) {
+                console.error('游戏状态未初始化，无法掷骰子');
+                showStatusMessage('游戏状态未初始化', true);
+                return;
+            }
+            
+            // 如果处于选择初始位置阶段，检查剩余玩家并提示
+            if (gameState.selecting_start) {
+                const remainingPlayers = gameState.players.filter(player => !player.position).map(p => p.name).join('、');
+                
+                // 检查是否所有玩家都有位置
+                let allPlayersHavePositions = true;
+                for (const player of gameState.players) {
+                    if (!player.position) {
+                        allPlayersHavePositions = false;
+                        break;
+                    }
+                }
+                
+                if (allPlayersHavePositions) {
+                    console.log("检测到所有玩家都有位置，尝试强制开始游戏");
+                    showStatusMessage('检测到所有玩家都有位置，尝试强制开始游戏...');
+                    
+                    // 如果所有玩家都有位置，强制开始游戏
+                    socket.emit('roll_dice', {
+                        force_start: true
+                    });
+                    console.log('发送强制开始游戏请求');
+                    
+                    // 为防止多次点击，暂时禁用按钮
+                    rollDiceBtn.disabled = true;
+                    setTimeout(() => {
+                        rollDiceBtn.disabled = false;
+                    }, 3000);
+                    
+                    return;
+                }
+                
+                showStatusMessage(`游戏处于初始位置选择阶段，请先为以下玩家选择起始位置: ${remainingPlayers}`, true);
+                console.log('仍需选择初始位置的玩家:', remainingPlayers);
+                return;
+            }
+            
+            if (gameState.dice_value > 0) {
+                showStatusMessage('已经掷过骰子，请先移动', true);
+                return;
+            }
+            
+            console.log('发送掷骰子请求');
+            
+            // 按钮点击后立即禁用，防止重复点击
+            rollDiceBtn.disabled = true;
+            
+            // 显示掷骰子中的动画效果
+            diceResult.textContent = '...';
+            console.log('设置骰子显示为"..."，等待服务器响应');
+            
+            // 发送掷骰子请求
+            console.log('发送 roll_dice 事件到服务器');
+            socket.emit('roll_dice', {});
+            showStatusMessage('掷骰子中...');
+            
+            // 添加请求超时处理
+            setTimeout(() => {
+                if (diceResult.textContent === '...') {
+                    console.error('掷骰子请求超时!');
+                    diceResult.textContent = '超时';
+                    showStatusMessage('掷骰子请求超时，请重试', true);
+                }
+                // 2秒后重新启用按钮
+                rollDiceBtn.disabled = false;
+            }, 5000);
+            
+        } catch (error) {
+            console.error('掷骰子按钮点击处理错误:', error);
+            showStatusMessage('处理错误: ' + error.message, true);
+            rollDiceBtn.disabled = false;
+        }
+    });
+
+    // 向上按钮点击事件
+    floorUpBtn.addEventListener('click', () => {
+        console.log('点击向上按钮');
+        if (currentFloorValue < 5) { // 假设最大楼层为5
+            currentFloorValue++;
+            currentFloor.textContent = currentFloorValue;
+            socket.emit('change_floor', { floor: currentFloorValue });
+            showStatusMessage(`切换到第${currentFloorValue}层`);
+            drawBoard();
+        }
+    });
+
+    // 向下按钮点击事件
+    floorDownBtn.addEventListener('click', () => {
+        console.log('点击向下按钮');
+        if (currentFloorValue > 1) {
+            currentFloorValue--;
+            currentFloor.textContent = currentFloorValue;
+            socket.emit('change_floor', { floor: currentFloorValue });
+            showStatusMessage(`切换到第${currentFloorValue}层`);
+            drawBoard();
+        }
+    });
+
+    // 旋转按钮点击事件
+    rotateBtn.addEventListener('click', () => {
+        console.log('点击旋转按钮');
+        socket.emit('rotate_card');
+        showStatusMessage('旋转卡片');
+    });
+
+    // 放置按钮点击事件
+    placeBtn.addEventListener('click', () => {
+        console.log('点击放置按钮');
+        isPlaceMode = !isPlaceMode;
+        
+        if (isPlaceMode) {
+            placeBtn.classList.add('active');
+            showStatusMessage('请点击棋盘上的位置放置卡片');
+        } else {
+            placeBtn.classList.remove('active');
+            showStatusMessage('已取消放置模式');
+        }
+    });
+
+    // 增加迷惑值按钮点击事件
+    increaseDazeBtn.addEventListener('click', () => {
+        console.log('点击增加迷惑值按钮');
+        socket.emit('change_daze', { change: 1 });
+        showStatusMessage('增加迷惑值');
+    });
+
+    // 减少迷惑值按钮点击事件
+    decreaseDazeBtn.addEventListener('click', () => {
+        console.log('点击减少迷惑值按钮');
+        socket.emit('change_daze', { change: -1 });
+        showStatusMessage('减少迷惑值');
+    });
+
     // 回合结束按钮
     endTurnBtn.addEventListener('click', () => {
+        console.log('点击结束回合按钮');
         if (!gameState || gameState.selecting_start) {
             showStatusMessage('请先选择起始位置', true);
             return;
@@ -1202,7 +1357,7 @@ document.addEventListener('DOMContentLoaded', () => {
         socket.emit('end_turn', {});
         showStatusMessage('回合结束');
     });
-    
+
     // 添加强制开始游戏按钮
     const gameControlPanel = document.querySelector('.game-controls');
     if (gameControlPanel) {
@@ -1239,5 +1394,47 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 添加到控制面板
         gameControlPanel.appendChild(forceStartBtn);
+        
+        // 添加调试骰子按钮
+        const debugDiceBtn = document.createElement('button');
+        debugDiceBtn.id = 'debug-dice-btn';
+        debugDiceBtn.textContent = '测试骰子(值=3)';
+        debugDiceBtn.className = 'debug-btn';
+        debugDiceBtn.style.backgroundColor = '#e91e63';
+        debugDiceBtn.style.margin = '10px 0 10px 10px';
+        debugDiceBtn.style.padding = '10px 20px';
+        
+        // 添加点击事件
+        debugDiceBtn.addEventListener('click', () => {
+            console.log('点击测试骰子按钮');
+            
+            // 手动设置骰子值
+            const testDiceValue = 3;
+            if (gameState) {
+                gameState.dice_value = testDiceValue;
+                gameState.moved = false;
+                diceResult.textContent = testDiceValue;
+                
+                console.log('手动设置骰子值:', {
+                    dice_value: gameState.dice_value,
+                    moved: gameState.moved
+                });
+                
+                // 显示移动提示
+                const currentPlayer = gameState.players[gameState.current_player];
+                showStatusMessage(`测试模式：${currentPlayer.name}掷出了${testDiceValue}点，请选择高亮显示的格子进行移动`);
+                
+                // 重绘棋盘以高亮显示可移动的格子
+                drawBoard();
+                
+                // 添加移动提示
+                addMoveTip();
+            } else {
+                showStatusMessage('游戏状态未初始化，无法测试', true);
+            }
+        });
+        
+        // 添加到控制面板
+        gameControlPanel.appendChild(debugDiceBtn);
     }
 }); 

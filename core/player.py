@@ -20,6 +20,7 @@ class Player:
         
         # Status
         self.daze = 0    # Confusion value
+        self.dice_value = 0  # 当前骰子值
         
         # Drawing related
         self.rect = pygame.Rect(0, 0, TILE_SIZE // 2, TILE_SIZE // 2)
@@ -48,6 +49,30 @@ class Player:
             value: Confusion value to add
         """
         self.daze += value
+    
+    def set_dice_value(self, value):
+        """设置玩家的骰子值
+        
+        Args:
+            value: 骰子值
+        """
+        self.dice_value = value
+    
+    def get_dice_value(self):
+        """获取玩家的骰子值
+        
+        Returns:
+            当前骰子值
+        """
+        return self.dice_value
+    
+    def reduce_dice_value(self, value):
+        """减少骰子值（用于移动后）
+        
+        Args:
+            value: 要减少的值
+        """
+        self.dice_value = max(0, self.dice_value - value)
     
     def draw(self, screen, board_offset, current=False):
         """Draw player

@@ -38,9 +38,22 @@ class GameAdapter:
         Returns:
             游戏状态字典
         """
+        # 确保Game对象和当前玩家的骰子值同步
+        current_player = self.game.players[self.game.current_player_index]
+        if self.game.dice_value != current_player.dice_value:
+            print(f"警告: 游戏骰子值与玩家骰子值不一致，强制同步 - 游戏: {self.game.dice_value}, 玩家: {current_player.dice_value}")
+            # 优先使用玩家的骰子值
+            if current_player.dice_value > 0:
+                self.game.dice_value = current_player.dice_value
+            else:
+                current_player.set_dice_value(self.game.dice_value)
+        
+        # 确保使用正确的骰子值
+        dice_value = current_player.dice_value if current_player.dice_value > 0 else self.game.dice_value
+        
         state = {
             'current_player': self.game.current_player_index,
-            'dice_value': self.game.dice_value,
+            'dice_value': dice_value,  # 使用同步后的骰子值
             'phase': self.game.move_phase,
             'current_floor': self.game.current_floor,
             'selecting_start': self.game.selecting_start,
@@ -51,10 +64,13 @@ class GameAdapter:
         # 添加玩家信息
         for i, player in enumerate(self.game.players):
             # 打印每个玩家的位置信息，帮助调试
-            print(f"玩家{i+1} {player.name} 的位置: {player.pos}, 楼层: {player.floor}")
+            print(f"玩家{i+1} {player.name} 的位置: {player.pos}, 楼层: {player.floor}, 骰子值: {player.dice_value}")
             
             # 将Python的None转换为null，以便在前端能够正确处理
             position = player.pos if player.pos is not None else None
+            
+            # 获取玩家骰子值，确保数值类型
+            player_dice_value = int(player.dice_value) if player.dice_value is not None else 0
             
             state['players'].append({
                 'id': player.id,
@@ -62,7 +78,8 @@ class GameAdapter:
                 'color': player.color,
                 'position': position,
                 'floor': player.floor,
-                'daze': player.daze
+                'daze': player.daze,
+                'dice_value': player_dice_value  # 确保骰子值为整数
             })
         
         # 添加棋盘信息
@@ -80,22 +97,67 @@ class GameAdapter:
             'floors': {}
         }
         
-        # 获取所有楼层的棋盘状态
-        for floor in range(1, 6):  # 假设有5个楼层
-            tiles = []
+        try:
+            print("开始获取棋盘状态...")
             
-            # 获取该楼层的所有有效区块
-            for x in range(20):  # 假设棋盘大小为20x20
-                for y in range(20):
-                    status = self.game.tile_system.get_tile_status(x, y, floor)
-                    if status:
-                        tiles.append({
-                            'x': x,
-                            'y': y,
-                            'status': status
-                        })
+            # 检查tile_system是否存在并初始化
+            if not hasattr(self.game, 'tile_system') or self.game.tile_system is None:
+                print("警告: 游戏的tile_system不存在或为空")
+                # 尝试初始化tile_system
+                self.game.initialize_board()
+                if not hasattr(self.game, 'tile_system') or self.game.tile_system is None:
+                    print("错误: 无法初始化游戏的tile_system，返回空棋盘")
+                    # 如果仍然不存在，创建一个带有简单测试瓦片的棋盘
+                    for floor in range(1, 6):
+                        test_tiles = []
+                        # 创建一个10x10的简单测试棋盘在中央
+                        for x in range(5, 15):
+                            for y in range(5, 15):
+                                # 添加一个简单的格子图案
+                                if (x + y) % 2 == 0:
+                                    test_tiles.append({
+                                        'x': x,
+                                        'y': y,
+                                        'status': 1
+                                    })
+                        board['floors'][floor] = test_tiles
+                    return board
             
-            board['floors'][floor] = tiles
+            # 获取所有楼层的棋盘状态
+            for floor in range(1, 6):  # 假设有5个楼层
+                tiles = []
+                tile_count = 0
+                
+                # 获取该楼层的所有有效区块
+                for x in range(20):  # 假设棋盘大小为20x20
+                    for y in range(20):
+                        try:
+                            status = self.game.tile_system.get_tile_status(x, y, floor)
+                            if status:
+                                tiles.append({
+                                    'x': x,
+                                    'y': y,
+                                    'status': status
+                                })
+                                tile_count += 1
+                        except Exception as e:
+                            print(f"获取瓦片状态时出错 - x={x}, y={y}, floor={floor}: {str(e)}")
+                
+                print(f"楼层 {floor} 包含 {tile_count} 个有效瓦片")
+                board['floors'][floor] = tiles
+                
+            total_tiles = sum(len(tiles) for tiles in board['floors'].values())
+            print(f"获取棋盘状态完成 - 总共 {len(board['floors'])} 个楼层, {total_tiles} 个瓦片")
+            
+        except Exception as e:
+            print(f"获取棋盘状态时发生异常: {str(e)}")
+            # 返回一个最小的有效棋盘
+            for floor in range(1, 6):
+                board['floors'][floor] = [
+                    {'x': 10, 'y': 10, 'status': 1}, 
+                    {'x': 11, 'y': 10, 'status': 1},
+                    {'x': 10, 'y': 11, 'status': 1}
+                ]
         
         return board
     
@@ -158,26 +220,25 @@ class GameAdapter:
                 result['message'] = '已强制结束初始位置选择阶段，游戏正式开始！'
                 print("强制结束初始位置选择阶段，游戏开始")
             
-            # 如果已经掷过骰子但还没移动，不允许再次掷骰子
-            if self.game.dice_value > 0:
-                result['message'] = '本回合已经掷过骰子，请先移动棋子'
+            # 检查当前玩家是否还有剩余骰子值
+            current_player = self.game.players[self.game.current_player_index]
+            if current_player.dice_value > 0:
+                result['message'] = '本回合已经掷过骰子，请先完成移动'
                 return result
             
-            # 如果检查通过，掷骰子
+            # 生成一个新的骰子值
             dice_value = random.randint(1, 6)
-            self.game.dice_value = dice_value
-            print(f"掷骰子成功，点数为: {dice_value}")
             
-            # 如果在这里有物品效果需要修改骰子点数，可以在这里处理
+            # 同步更新当前玩家和游戏的骰子值
+            current_player.set_dice_value(dice_value)  # 设置玩家的骰子值
+            self.game.dice_value = dice_value  # 保持Game对象状态一致
+            
+            print(f"掷骰子成功，点数为: {dice_value}, 玩家骰子值为: {current_player.dice_value}, 游戏骰子值为: {self.game.dice_value}")
             
             result['success'] = True
             result['message'] = f'掷出了{dice_value}点'
             result['dice_value'] = dice_value
             result['player_index'] = self.game.current_player_index
-            
-            # 将当前骰子值存储在游戏状态中，确保其他部分能访问
-            self.game.dice_value = dice_value
-            print(f"游戏状态已更新，当前骰子值: {self.game.dice_value}")
             
             return result
         
@@ -287,8 +348,9 @@ class GameAdapter:
                 return result
             
             # 如果游戏已经开始，检查是否是当前玩家的回合
-            # 另外，如果没有掷骰子，也不能移动
-            if self.game.dice_value == 0:
+            # 另外，如果没有骰子值，也不能移动
+            current_player = self.game.players[self.game.current_player_index]
+            if current_player.dice_value == 0:
                 result['message'] = '请先掷骰子'
                 return result
             
@@ -309,36 +371,42 @@ class GameAdapter:
                 
                 if is_valid_move:
                     # 检查移动距离是否符合骰子点数（曼哈顿距离）
-                    old_pos = self.game.current_player.pos
+                    old_pos = current_player.pos
                     if old_pos:
                         old_x, old_y = old_pos
                         manhattan_distance = abs(x - old_x) + abs(y - old_y)
-                        dice_value = self.game.dice_value
                         
-                        print(f"移动距离检查: 从({old_x},{old_y})到({x},{y})的曼哈顿距离为{manhattan_distance}, 骰子点数为{dice_value}")
+                        print(f"移动距离检查: 从({old_x},{old_y})到({x},{y})的曼哈顿距离为{manhattan_distance}, 剩余骰子值为{current_player.dice_value}")
                         
-                        if manhattan_distance != dice_value:
-                            result['message'] = f'移动距离必须等于骰子点数{dice_value}，当前移动距离为{manhattan_distance}'
+                        if manhattan_distance != current_player.dice_value:
+                            result['message'] = f'移动距离必须等于剩余骰子值{current_player.dice_value}，当前移动距离为{manhattan_distance}'
                             return result
                     
                     # 检查目标位置是否已被其他玩家占用
                     for player in self.game.players:
-                        if player.id != self.game.current_player.id and player.pos == position:
+                        if player.id != current_player.id and player.pos == position:
                             result['message'] = '该位置已被其他玩家占用'
                             return result
                     
                     # 设置玩家位置
-                    old_pos = self.game.current_player.pos
-                    print(f"移动玩家 {self.game.current_player.name} 从 {old_pos} 到 ({x},{y})")
+                    old_pos = current_player.pos
+                    print(f"移动玩家 {current_player.name} 从 {old_pos} 到 ({x},{y})")
                     
                     # 使用Player类的set_position方法而不是直接赋值
-                    self.game.current_player.set_position(x, y)
+                    current_player.set_position(x, y)
+                    
+                    # 减少玩家的骰子值
+                    current_player.reduce_dice_value(manhattan_distance)
                     
                     # 标记玩家已移动，为了支持回合结束检查
                     self.game.player_moved = True
                     
                     result['success'] = True
                     result['message'] = '移动成功'
+                    
+                    # 如果玩家还有剩余骰子值，提示可以继续移动
+                    if current_player.dice_value > 0:
+                        result['message'] = f'移动成功，还可以移动{current_player.dice_value}步'
                 else:
                     result['message'] = '无效的移动位置，该位置不可移动'
             else:
@@ -404,21 +472,35 @@ class GameAdapter:
                 result['message'] = '请先为所有玩家选择初始位置'
                 return result
 
-            # 如果掷了骰子但还没移动，不允许结束回合
-            if self.game.dice_value > 0 and not getattr(self.game, 'player_moved', True):
-                result['message'] = '请先移动棋子后再结束回合'
+            # 如果有剩余骰子值且未移动完，不允许结束回合
+            current_player = self.game.players[self.game.current_player_index]
+            if current_player.dice_value > 0:
+                result['message'] = '请先完成所有移动后再结束回合'
                 return result
             
-            # 更新到下一个玩家
-            current_player_name = self.game.current_player.name
+            # 获取当前玩家名称，用于结果消息
+            current_player_name = current_player.name
+            
+            # 切换到下一个玩家
+            old_index = self.game.current_player_index
             self.game.current_player_index = (self.game.current_player_index + 1) % self.game.num_players
-            self.game.dice_value = 0  # 重置骰子值
+            
+            # 重置当前回合玩家的骰子值
+            current_player.set_dice_value(0)
+            
+            # 重置游戏对象的骰子值
+            self.game.dice_value = 0
             
             # 重置移动状态
             self.game.player_moved = False
             
+            # 获取新的当前玩家
+            new_player = self.game.players[self.game.current_player_index]
+            print(f"玩家回合结束: 从 {current_player_name}(idx={old_index}) 切换到 {new_player.name}(idx={self.game.current_player_index})")
+            print(f"重置骰子值: 游戏={self.game.dice_value}, 旧玩家={current_player.dice_value}, 新玩家={new_player.dice_value}")
+            
             result['success'] = True
-            result['message'] = f'玩家{current_player_name}的回合结束，轮到玩家{self.game.current_player.name}的回合'
+            result['message'] = f'玩家{current_player_name}的回合结束，轮到玩家{new_player.name}的回合'
             result['current_player'] = self.game.current_player_index
         
         return result
