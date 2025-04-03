@@ -59,6 +59,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const storedPlayerId = localStorage.getItem('playerId') || 0;
         console.log(`使用存储的玩家ID: ${storedPlayerId}`);
         
+        // 同时记录oldPlayerId，用于后续检测玩家ID变化
+        localStorage.setItem('oldPlayerId', storedPlayerId.toString());
+        console.log(`设置oldPlayerId为: ${storedPlayerId}`);
+        
         socket.emit('join_game', {
             game_id: GAME_ID,
             player_id: storedPlayerId
@@ -173,6 +177,27 @@ document.addEventListener('DOMContentLoaded', () => {
             state.players.forEach((player, idx) => {
                 console.log(`- 玩家${idx+1}: id=${player.id}, name=${player.name}, position=${JSON.stringify(player.position)}, floor=${player.floor}`);
             });
+            
+            // 检查当前玩家ID，并保存到localStorage
+            const currentPlayerIndex = parseInt(state.current_player);
+            if (!isNaN(currentPlayerIndex) && state.players[currentPlayerIndex]) {
+                // 保存玩家索引到localStorage，这是current_player的值
+                console.log(`保存当前玩家索引到localStorage: ${currentPlayerIndex}`);
+                localStorage.setItem('playerId', currentPlayerIndex.toString());
+                
+                // 检查是否需要更新服务器端session
+                const oldPlayerId = parseInt(localStorage.getItem('oldPlayerId') || '-1');
+                if (oldPlayerId !== currentPlayerIndex) {
+                    console.log(`玩家索引已变更: ${oldPlayerId} -> ${currentPlayerIndex}，向服务器同步`);
+                    // 发送加入游戏事件，更新服务器端session
+                    socket.emit('join_game', {
+                        game_id: GAME_ID,
+                        player_id: currentPlayerIndex
+                    });
+                    // 记录已更新的ID，避免重复发送
+                    localStorage.setItem('oldPlayerId', currentPlayerIndex.toString());
+                }
+            }
         } else {
             console.error('状态中没有玩家数据!');
         }
@@ -376,6 +401,21 @@ document.addEventListener('DOMContentLoaded', () => {
             // 显示成功消息
             const isError = data.message.includes('错误') || data.message.includes('失败');
             showStatusMessage(data.message, isError);
+            
+            // 检查是否为加入游戏成功消息
+            if (data.message.includes('已加入游戏')) {
+                console.log('收到加入游戏成功消息');
+                // 如果消息中包含player_id，则更新本地存储
+                if (data.player_id !== undefined) {
+                    const playerIdFromServer = parseInt(data.player_id);
+                    console.log(`从服务器接收到玩家ID: ${playerIdFromServer}`);
+                    
+                    // 更新本地存储
+                    localStorage.setItem('playerId', playerIdFromServer.toString());
+                    localStorage.setItem('oldPlayerId', playerIdFromServer.toString());
+                    console.log(`已更新本地存储的玩家ID: ${playerIdFromServer}`);
+                }
+            }
             
             // 如果检测到游戏阶段变更（从初始位置选择阶段转为正常游戏）
             if (data.phase_changed || data.message.includes('游戏正式开始')) {
@@ -1342,10 +1382,43 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         // 获取玩家ID，如果存储中有就使用，否则默认为0
-        const playerId = parseInt(localStorage.getItem('playerId') || '0');
+        const storedPlayerId = localStorage.getItem('playerId');
+        const playerId = parseInt(storedPlayerId || '0');
         
-        if (gameState.current_turn !== playerId) {
-            showStatusMessage('不是你的回合', true);
+        console.log('检查回合: ', {
+            当前玩家ID: gameState.current_player,
+            当前玩家ID类型: typeof gameState.current_player,
+            本地玩家ID: playerId,
+            本地玩家ID原始值: storedPlayerId,
+            localStorage状态: localStorage.length > 0 ? '有数据' : '空',
+            玩家列表: gameState.players.map(p => `ID=${p.id}, 名称=${p.name}`)
+        });
+        
+        // 重要：确保current_player和本地玩家ID类型匹配，统一使用整数进行比较
+        const currentPlayerId = parseInt(gameState.current_player);
+        
+        console.log(`比较玩家ID: 当前玩家ID(${currentPlayerId}) vs 本地玩家ID(${playerId})`);
+        
+        // 如果当前玩家ID与本地存储不一致，先尝试同步
+        if (currentPlayerId !== playerId) {
+            console.warn(`玩家ID不匹配，尝试同步到服务器...`);
+            // 更新本地存储
+            localStorage.setItem('playerId', currentPlayerId.toString());
+            // 同步到服务器
+            socket.emit('join_game', {
+                game_id: GAME_ID,
+                player_id: currentPlayerId
+            });
+            
+            // 显示同步提示，延迟后再自动点击结束回合按钮
+            showStatusMessage('同步玩家ID中，请稍等...');
+            
+            // 一秒后重试
+            setTimeout(() => {
+                console.log('ID已同步，重新尝试结束回合');
+                endTurnBtn.click();
+            }, 1000);
+            
             return;
         }
         
@@ -1354,6 +1427,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         
+        console.log('发送end_turn事件到服务器');
         socket.emit('end_turn', {});
         showStatusMessage('回合结束');
     });

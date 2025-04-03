@@ -64,69 +64,28 @@ class GameAdapter:
             # 获取当前玩家对象
             current_player = self.game.players[current_player_index]
             
-            # 如果current_player是一个字典而不是Player对象，这可能表示数据结构不一致
-            if isinstance(current_player, dict):
-                print(f"错误: current_player是字典而不是Player对象: {current_player}")
-                # 尝试从字典中提取数据并创建一个Player对象
-                from core.player import Player
-                player_id = current_player.get('id', current_player_index)
-                player_name = current_player.get('name', f"玩家{player_id+1}")
-                player_color = current_player.get('color', (255,0,0))
-                player_obj = Player(player_id, player_name, player_color)
-                
-                # 同步其他属性
-                if 'position' in current_player:
-                    player_obj.set_position(*current_player['position']) if current_player['position'] else None
-                if 'dice_value' in current_player:
-                    player_obj.set_dice_value(current_player['dice_value'])
-                if 'floor' in current_player:
-                    player_obj.floor = current_player['floor']
-                if 'daze' in current_player:
-                    player_obj.daze = current_player['daze']
-                
-                # 更新players列表中的元素
-                self.game.players[current_player_index] = player_obj
-                current_player = player_obj
-                print(f"已将字典转换为Player对象: id={player_obj.id}, name={player_obj.name}")
+            # 同步Game对象和当前玩家的骰子值
+            if hasattr(self.game, 'dice_value') and hasattr(current_player, 'dice_value'):
+                if self.game.dice_value != current_player.dice_value:
+                    print(f"警告: 游戏对象的骰子值({self.game.dice_value})与当前玩家({current_player.name})的骰子值({current_player.dice_value})不一致")
+                    
+                    if current_player.dice_value > 0:
+                        # 如果玩家有非零骰子值，使用该值更新Game对象
+                        print(f"使用当前玩家的骰子值({current_player.dice_value})更新游戏对象")
+                        self.game.dice_value = current_player.dice_value
+                    else:
+                        # 否则使用Game对象的值更新玩家
+                        print(f"使用游戏对象的骰子值({self.game.dice_value})更新当前玩家")
+                        current_player.set_dice_value(self.game.dice_value)
             
-            # 确保玩家对象有所需的方法和属性
-            if not hasattr(current_player, 'dice_value'):
-                print(f"警告: Player对象缺少dice_value属性，添加默认值0")
-                current_player.dice_value = 0
-                
-            if not hasattr(current_player, 'set_dice_value'):
-                print(f"警告: Player对象缺少set_dice_value方法，添加默认实现")
-                current_player.set_dice_value = lambda value: setattr(current_player, 'dice_value', value)
+            # 获取最终同步后的骰子值
+            dice_value = self.game.dice_value
             
-            # 确保游戏对象有dice_value属性
-            if not hasattr(self.game, 'dice_value'):
-                print(f"警告: Game对象缺少dice_value属性，添加默认值0")
-                self.game.dice_value = 0
-                
-            # 同步骰子值
-            if self.game.dice_value != current_player.dice_value:
-                print(f"警告: 游戏骰子值与玩家骰子值不一致，强制同步 - 游戏: {self.game.dice_value}, 玩家: {current_player.dice_value}")
-                # 优先使用玩家的骰子值
-                # 确保 dice_value 是数值类型
-                if isinstance(current_player.dice_value, dict):
-                    print(f"错误: current_player.dice_value 是字典: {current_player.dice_value}，转换为整数0")
-                    current_player.dice_value = 0
-                
-                if isinstance(current_player.dice_value, (int, float)) and current_player.dice_value > 0:
-                    self.game.dice_value = current_player.dice_value
-                else:
-                    current_player.set_dice_value(self.game.dice_value)
-            
-            # 确保使用正确的骰子值
-            # 再次检查类型
-            if isinstance(current_player.dice_value, dict):
-                print(f"错误: current_player.dice_value 仍然是字典: {current_player.dice_value}，转换为整数0")
-                current_player.dice_value = 0
-                
-            dice_value = current_player.dice_value if isinstance(current_player.dice_value, (int, float)) and current_player.dice_value > 0 else self.game.dice_value
+            # 打印同步后的信息
+            print(f"同步后: 游戏骰子值={self.game.dice_value}, 玩家({current_player.name})骰子值={current_player.dice_value}")
             
             state = {
-                'current_player': self.game.current_player_index,
+                'current_player': current_player_index,  # 直接使用current_player_index，确保是整数
                 'dice_value': dice_value,  # 使用同步后的骰子值
                 'phase': self.game.move_phase,
                 'current_floor': self.game.current_floor,
@@ -182,6 +141,9 @@ class GameAdapter:
             
             # 添加棋盘信息
             state['board'] = self.get_board_state()
+            
+            # 打印当前玩家信息用于调试
+            print(f"当前玩家索引: {current_player_index}, 玩家名称: {current_player.name}")
             
             return state
             
@@ -677,25 +639,17 @@ class GameAdapter:
             current_player_name = current_player.name
             old_index = self.game.current_player_index
             
-            # 调用Game类的next_player方法，确保使用游戏核心的逻辑
-            if hasattr(self.game, 'next_player'):
-                self.game.next_player()
-                print(f"使用Game核心方法切换回合，索引从 {old_index} 变为 {self.game.current_player_index}")
-            else:
-                # 如果没有next_player方法，回退到手动切换逻辑
-                # 切换到下一个玩家
-                self.game.current_player_index = (self.game.current_player_index + 1) % self.game.num_players
-                
-                # 重置当前回合玩家的骰子值
-                current_player.set_dice_value(0)
-                
-                # 重置游戏对象的骰子值
-                self.game.dice_value = 0
-                
-                # 重置移动状态
-                self.game.player_moved = False
-                
-                print(f"手动切换回合，索引从 {old_index} 变为 {self.game.current_player_index}")
+            # 重置当前回合玩家的骰子值
+            current_player.set_dice_value(0)
+            
+            # 重置游戏对象的骰子值
+            self.game.dice_value = 0
+            
+            # 重置移动状态
+            self.game.player_moved = False
+            
+            # 切换到下一个玩家
+            self.game.current_player_index = (old_index + 1) % len(self.game.players)
             
             # 获取新的当前玩家
             new_player = self.game.players[self.game.current_player_index]
@@ -705,6 +659,8 @@ class GameAdapter:
             result['success'] = True
             result['message'] = f'玩家{current_player_name}的回合结束，轮到玩家{new_player.name}的回合'
             result['current_player'] = self.game.current_player_index
+            
+            return result
         
         return result
     

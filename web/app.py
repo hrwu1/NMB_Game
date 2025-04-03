@@ -220,8 +220,9 @@ def handle_join_game(data):
             if len(tiles) > 0:
                 print(f"  样本瓦片: {tiles[0]}")
     
+    print(f"广播游戏状态到房间: {game_id}")
     emit('game_state', game_state)
-    emit('success', {'message': f'已加入游戏 {game_id}'})
+    emit('success', {'message': f'已加入游戏 {game_id}', 'player_id': player_id})
     
     # 修复rooms()返回值的使用方式
     room_list = rooms()
@@ -576,17 +577,48 @@ def handle_change_daze(data):
 def handle_end_turn(data=None):
     """处理结束回合事件"""
     game_id = get_game_id()
+    player_id = session.get('player_id')
     
     if not game_id:
         emit('error', {'message': '游戏不存在'})
         return
     
+    if player_id is None:
+        emit('error', {'message': '玩家ID未设置'})
+        return
+    
+    # 确保player_id是整数类型
+    player_id = int(player_id)
+    print(f"玩家 {player_id} 尝试结束回合")
+    
     game_adapter = games[game_id]
+    
+    # 详细打印游戏状态信息用于调试
+    game_state = game_adapter.get_game_state()
+    print(f"当前游戏状态: current_player_index={game_state.get('current_player_index', 'unknown')}, current_player={game_state.get('current_player', 'unknown')}")
+    
+    # 获取当前玩家ID - 确保从游戏状态中获取current_player字段，并将其转换为整数
+    current_player_id = int(game_state.get('current_player', 0))
+    print(f"当前玩家ID (从游戏状态): {current_player_id}, 类型: {type(current_player_id)}")
+    print(f"请求玩家ID: {player_id}, 类型: {type(player_id)}")
+    
+    # 直接使用游戏状态中的current_player与请求玩家ID比较
+    if current_player_id != player_id:
+        # 打印所有玩家信息用于调试
+        for i, player in enumerate(game_adapter.game.players):
+            print(f"玩家{i}: id={player.id}, name={player.name}")
+            
+        emit('error', {'message': f'不是你的回合，当前回合玩家ID: {current_player_id}'})
+        print(f"玩家 {player_id} 尝试结束玩家 {current_player_id} 的回合，操作被拒绝")
+        return
+    
+    print(f"验证通过，玩家 {player_id} 正在结束自己的回合")
     result = game_adapter.handle_event('end_turn', data)
     
     if result['success']:
         # 广播更新后的游戏状态
         game_state = format_game_state(game_adapter.get_game_state())
+        print(f"回合结束后的游戏状态: current_player={game_state.get('current_player')}")
         socketio.emit('game_state', game_state, room=game_id)
         
         if 'message' in result:
