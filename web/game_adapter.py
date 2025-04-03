@@ -661,32 +661,46 @@ class GameAdapter:
                 result['message'] = '请先为所有玩家选择初始位置'
                 return result
 
-            # 如果有剩余骰子值且未移动完，不允许结束回合
+            # 获取当前玩家
             current_player = self.game.players[self.game.current_player_index]
-            if current_player.dice_value > 0:
-                result['message'] = '请先完成所有移动后再结束回合'
+            
+            # 检查是否有剩余骰子值且未移动过，则不允许结束回合
+            if current_player.dice_value > 0 and not self.game.player_moved:
+                result['message'] = '请至少进行一次移动后再结束回合'
                 return result
             
-            # 获取当前玩家名称，用于结果消息
+            # 如果还有剩余骰子值，记录日志，但允许结束回合（可能无法移动全部步数）
+            if current_player.dice_value > 0 and self.game.player_moved:
+                print(f"警告: 玩家 {current_player.name} 结束回合时还有 {current_player.dice_value} 点骰子值未使用")
+            
+            # 获取当前玩家名称和索引，用于结果消息
             current_player_name = current_player.name
-            
-            # 切换到下一个玩家
             old_index = self.game.current_player_index
-            self.game.current_player_index = (self.game.current_player_index + 1) % self.game.num_players
             
-            # 重置当前回合玩家的骰子值
-            current_player.set_dice_value(0)
-            
-            # 重置游戏对象的骰子值
-            self.game.dice_value = 0
-            
-            # 重置移动状态
-            self.game.player_moved = False
+            # 调用Game类的next_player方法，确保使用游戏核心的逻辑
+            if hasattr(self.game, 'next_player'):
+                self.game.next_player()
+                print(f"使用Game核心方法切换回合，索引从 {old_index} 变为 {self.game.current_player_index}")
+            else:
+                # 如果没有next_player方法，回退到手动切换逻辑
+                # 切换到下一个玩家
+                self.game.current_player_index = (self.game.current_player_index + 1) % self.game.num_players
+                
+                # 重置当前回合玩家的骰子值
+                current_player.set_dice_value(0)
+                
+                # 重置游戏对象的骰子值
+                self.game.dice_value = 0
+                
+                # 重置移动状态
+                self.game.player_moved = False
+                
+                print(f"手动切换回合，索引从 {old_index} 变为 {self.game.current_player_index}")
             
             # 获取新的当前玩家
             new_player = self.game.players[self.game.current_player_index]
             print(f"玩家回合结束: 从 {current_player_name}(idx={old_index}) 切换到 {new_player.name}(idx={self.game.current_player_index})")
-            print(f"重置骰子值: 游戏={self.game.dice_value}, 旧玩家={current_player.dice_value}, 新玩家={new_player.dice_value}")
+            print(f"骰子值状态: 游戏={self.game.dice_value}, 旧玩家={current_player.dice_value}, 新玩家骰子值={new_player.dice_value}")
             
             result['success'] = True
             result['message'] = f'玩家{current_player_name}的回合结束，轮到玩家{new_player.name}的回合'

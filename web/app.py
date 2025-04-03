@@ -573,7 +573,7 @@ def handle_change_daze(data):
         emit('error', {'message': f'更改迷惑值时出错: {str(e)}'})
 
 @socketio.on('end_turn')
-def handle_end_turn():
+def handle_end_turn(data=None):
     """处理结束回合事件"""
     game_id = get_game_id()
     
@@ -582,7 +582,7 @@ def handle_end_turn():
         return
     
     game_adapter = games[game_id]
-    result = game_adapter.handle_event('end_turn')
+    result = game_adapter.handle_event('end_turn', data)
     
     if result['success']:
         # 广播更新后的游戏状态
