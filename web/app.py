@@ -5,12 +5,19 @@ import random
 import uuid
 import os
 import traceback
+import sys
+
+# 添加项目根目录到 sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(current_dir)
+sys.path.append(root_dir)
+
+# 现在可以正确导入 core 模块了
 from core.game import Game
 from web.game_adapter import GameAdapter
 import time
 
 # 获取当前文件所在目录的绝对路径
-current_dir = os.path.dirname(os.path.abspath(__file__))
 template_dir = os.path.join(current_dir, 'templates')
 static_dir = os.path.join(current_dir, 'static')
 
@@ -216,7 +223,31 @@ def handle_join_game(data):
     emit('game_state', game_state)
     emit('success', {'message': f'已加入游戏 {game_id}'})
     
-    print(f"房间 {game_id} 的玩家人数: {len(rooms()[game_id]) if game_id in rooms() else 0}")
+    # 修复rooms()返回值的使用方式
+    room_list = rooms()
+    print(f"当前用户所在的房间: {room_list}")
+    # 检查Flask-SocketIO的rooms()函数返回的是什么，并安全地获取玩家人数
+    try:
+        # 根据Flask-SocketIO文档，rooms()应该返回当前客户端所在的房间列表
+        if isinstance(room_list, list):
+            # 如果rooms()返回的是列表，检查game_id是否在列表中
+            if game_id in room_list:
+                print(f"房间 {game_id} 中包含当前客户端")
+            else:
+                print(f"当前客户端不在房间 {game_id} 中")
+            # 这里无法获取房间中的客户端数量，只能知道当前客户端所在的房间
+            print(f"无法通过rooms()获取房间内的客户端数量")
+        elif isinstance(room_list, dict):
+            # 如果rooms()返回的是字典，尝试获取game_id的值
+            if game_id in room_list:
+                print(f"房间 {game_id} 的连接数: {len(room_list[game_id])}")
+            else:
+                print(f"房间字典中没有 {game_id}")
+        else:
+            print(f"rooms()返回了未知类型: {type(room_list)}")
+    except Exception as e:
+        print(f"尝试获取房间信息时出错: {str(e)}")
+        traceback.print_exc()
 
 @socketio.on('roll_dice')
 def handle_roll_dice(data=None):
@@ -234,20 +265,33 @@ def handle_roll_dice(data=None):
     
     # 记录当前玩家
     current_player_id = game_adapter.game.current_player
-    current_player = game_adapter.game.players[current_player_id] if current_player_id is not None else None
-    print(f"当前玩家: {current_player_id} - {current_player.name if current_player else 'None'}")
+    
+    # 检查current_player_id的类型
+    if hasattr(current_player_id, 'id'):
+        # 如果current_player_id是Player对象，获取其id属性
+        current_player_index = current_player_id.id
+        current_player = current_player_id
+        print(f"当前玩家是Player对象: id={current_player_index}, name={current_player.name}")
+    else:
+        # 如果current_player_id是索引值
+        current_player_index = current_player_id
+        current_player = game_adapter.game.players[current_player_index] if current_player_index is not None else None
+        print(f"当前玩家索引: {current_player_index}, 玩家: {current_player.name if current_player else 'None'}")
     
     try:
         # 处理掷骰子事件
-        dice_value = game_adapter.handle_event('roll_dice', data or {})
-        print(f"掷骰子结果: {dice_value}")
+        result = game_adapter.handle_event('roll_dice', data or {})
+        print(f"掷骰子结果: {result}")
         
         # 检查是否成功
-        if dice_value is None or dice_value == 0:
-            print(f"掷骰子失败")
-            emit('error', {'message': '掷骰子失败，请检查游戏状态'})
+        if not result['success']:
+            print(f"掷骰子失败: {result['message']}")
+            emit('error', {'message': result['message']})
             return
             
+        # 获取骰子值
+        dice_value = result['dice_value']
+        
         # 检查玩家骰子值同步情况
         if current_player:
             if current_player.dice_value != dice_value:
@@ -268,10 +312,10 @@ def handle_roll_dice(data=None):
             game_state['dice_value'] = dice_value
             
         # 确保当前玩家的骰子值一致
-        if 'players' in game_state and current_player_id is not None:
-            if game_state['players'][current_player_id]['dice_value'] != dice_value:
-                print(f"警告: 格式化后的玩家骰子值仍不一致! 修复: {game_state['players'][current_player_id]['dice_value']} -> {dice_value}")
-                game_state['players'][current_player_id]['dice_value'] = dice_value
+        if 'players' in game_state and current_player_index is not None:
+            if game_state['players'][current_player_index]['dice_value'] != dice_value:
+                print(f"警告: 格式化后的玩家骰子值仍不一致! 修复: {game_state['players'][current_player_index]['dice_value']} -> {dice_value}")
+                game_state['players'][current_player_index]['dice_value'] = dice_value
         
         print(f"广播游戏状态到房间: {game_id}")
         socketio.emit('game_state', game_state, room=game_id)
@@ -398,7 +442,16 @@ def handle_rotate_card():
         
         # 检查是否是当前玩家的回合
         current_player_id = game_adapter.game.current_player
-        if current_player_id != player_id:
+        
+        # 检查current_player_id的类型
+        if hasattr(current_player_id, 'id'):
+            # 如果current_player_id是Player对象，获取其id属性
+            current_player_index = current_player_id.id
+        else:
+            # 如果current_player_id是索引值
+            current_player_index = current_player_id
+            
+        if current_player_index != player_id:
             emit('error', {'message': '不是你的回合'})
             return
         
@@ -475,7 +528,16 @@ def handle_change_daze(data):
         
         # 检查是否是当前玩家的回合
         current_player_id = game_adapter.game.current_player
-        if current_player_id != player_id:
+        
+        # 检查current_player_id的类型
+        if hasattr(current_player_id, 'id'):
+            # 如果current_player_id是Player对象，获取其id属性
+            current_player_index = current_player_id.id
+        else:
+            # 如果current_player_id是索引值
+            current_player_index = current_player_id
+            
+        if current_player_index != player_id:
             emit('error', {'message': '不是你的回合'})
             return
         

@@ -39,53 +39,168 @@ class GameAdapter:
             游戏状态字典
         """
         # 确保Game对象和当前玩家的骰子值同步
-        current_player = self.game.players[self.game.current_player_index]
-        if self.game.dice_value != current_player.dice_value:
-            print(f"警告: 游戏骰子值与玩家骰子值不一致，强制同步 - 游戏: {self.game.dice_value}, 玩家: {current_player.dice_value}")
-            # 优先使用玩家的骰子值
-            if current_player.dice_value > 0:
-                self.game.dice_value = current_player.dice_value
-            else:
-                current_player.set_dice_value(self.game.dice_value)
-        
-        # 确保使用正确的骰子值
-        dice_value = current_player.dice_value if current_player.dice_value > 0 else self.game.dice_value
-        
-        state = {
-            'current_player': self.game.current_player_index,
-            'dice_value': dice_value,  # 使用同步后的骰子值
-            'phase': self.game.move_phase,
-            'current_floor': self.game.current_floor,
-            'selecting_start': self.game.selecting_start,
-            'moved': getattr(self.game, 'player_moved', False),
-            'players': []
-        }
-        
-        # 添加玩家信息
-        for i, player in enumerate(self.game.players):
-            # 打印每个玩家的位置信息，帮助调试
-            print(f"玩家{i+1} {player.name} 的位置: {player.pos}, 楼层: {player.floor}, 骰子值: {player.dice_value}")
+        try:
+            # 检查current_player_index的值是否有效
+            if not hasattr(self.game, 'current_player_index') or self.game.current_player_index is None:
+                print(f"警告: current_player_index不存在或为None，设置为默认值0")
+                self.game.current_player_index = 0
+                
+            # 获取当前玩家索引和玩家对象
+            current_player_index = self.game.current_player_index
             
-            # 将Python的None转换为null，以便在前端能够正确处理
-            position = player.pos if player.pos is not None else None
+            # 检查players列表是否有效
+            if not hasattr(self.game, 'players') or not self.game.players:
+                print(f"警告: players列表不存在或为空")
+                # 创建一个初始玩家，避免代码崩溃
+                from core.player import Player
+                self.game.players = [Player(0, "测试玩家", (255,0,0))]
             
-            # 获取玩家骰子值，确保数值类型
-            player_dice_value = int(player.dice_value) if player.dice_value is not None else 0
+            # 确保索引在有效范围内
+            if current_player_index >= len(self.game.players):
+                print(f"警告: current_player_index={current_player_index}超出players列表范围{len(self.game.players)}，修正为0")
+                current_player_index = 0
+                self.game.current_player_index = 0
             
-            state['players'].append({
-                'id': player.id,
-                'name': player.name,
-                'color': player.color,
-                'position': position,
-                'floor': player.floor,
-                'daze': player.daze,
-                'dice_value': player_dice_value  # 确保骰子值为整数
-            })
-        
-        # 添加棋盘信息
-        state['board'] = self.get_board_state()
-        
-        return state
+            # 获取当前玩家对象
+            current_player = self.game.players[current_player_index]
+            
+            # 如果current_player是一个字典而不是Player对象，这可能表示数据结构不一致
+            if isinstance(current_player, dict):
+                print(f"错误: current_player是字典而不是Player对象: {current_player}")
+                # 尝试从字典中提取数据并创建一个Player对象
+                from core.player import Player
+                player_id = current_player.get('id', current_player_index)
+                player_name = current_player.get('name', f"玩家{player_id+1}")
+                player_color = current_player.get('color', (255,0,0))
+                player_obj = Player(player_id, player_name, player_color)
+                
+                # 同步其他属性
+                if 'position' in current_player:
+                    player_obj.set_position(*current_player['position']) if current_player['position'] else None
+                if 'dice_value' in current_player:
+                    player_obj.set_dice_value(current_player['dice_value'])
+                if 'floor' in current_player:
+                    player_obj.floor = current_player['floor']
+                if 'daze' in current_player:
+                    player_obj.daze = current_player['daze']
+                
+                # 更新players列表中的元素
+                self.game.players[current_player_index] = player_obj
+                current_player = player_obj
+                print(f"已将字典转换为Player对象: id={player_obj.id}, name={player_obj.name}")
+            
+            # 确保玩家对象有所需的方法和属性
+            if not hasattr(current_player, 'dice_value'):
+                print(f"警告: Player对象缺少dice_value属性，添加默认值0")
+                current_player.dice_value = 0
+                
+            if not hasattr(current_player, 'set_dice_value'):
+                print(f"警告: Player对象缺少set_dice_value方法，添加默认实现")
+                current_player.set_dice_value = lambda value: setattr(current_player, 'dice_value', value)
+            
+            # 确保游戏对象有dice_value属性
+            if not hasattr(self.game, 'dice_value'):
+                print(f"警告: Game对象缺少dice_value属性，添加默认值0")
+                self.game.dice_value = 0
+                
+            # 同步骰子值
+            if self.game.dice_value != current_player.dice_value:
+                print(f"警告: 游戏骰子值与玩家骰子值不一致，强制同步 - 游戏: {self.game.dice_value}, 玩家: {current_player.dice_value}")
+                # 优先使用玩家的骰子值
+                # 确保 dice_value 是数值类型
+                if isinstance(current_player.dice_value, dict):
+                    print(f"错误: current_player.dice_value 是字典: {current_player.dice_value}，转换为整数0")
+                    current_player.dice_value = 0
+                
+                if isinstance(current_player.dice_value, (int, float)) and current_player.dice_value > 0:
+                    self.game.dice_value = current_player.dice_value
+                else:
+                    current_player.set_dice_value(self.game.dice_value)
+            
+            # 确保使用正确的骰子值
+            # 再次检查类型
+            if isinstance(current_player.dice_value, dict):
+                print(f"错误: current_player.dice_value 仍然是字典: {current_player.dice_value}，转换为整数0")
+                current_player.dice_value = 0
+                
+            dice_value = current_player.dice_value if isinstance(current_player.dice_value, (int, float)) and current_player.dice_value > 0 else self.game.dice_value
+            
+            state = {
+                'current_player': self.game.current_player_index,
+                'dice_value': dice_value,  # 使用同步后的骰子值
+                'phase': self.game.move_phase,
+                'current_floor': self.game.current_floor,
+                'selecting_start': self.game.selecting_start,
+                'moved': getattr(self.game, 'player_moved', False),
+                'players': []
+            }
+            
+            # 添加玩家信息
+            for i, player in enumerate(self.game.players):
+                # 检查player是否是字典
+                if isinstance(player, dict):
+                    print(f"警告: players[{i}]是字典而不是Player对象，尝试提取数据")
+                    player_dict = player
+                    
+                    # 提取玩家数据
+                    position = player_dict.get('position', None)
+                    floor = player_dict.get('floor', 1)
+                    dice_value = player_dict.get('dice_value', 0)
+                    
+                    # 打印信息
+                    print(f"玩家{i+1} {player_dict.get('name', f'未命名{i}')} 的位置: {position}, 楼层: {floor}, 骰子值: {dice_value}")
+                    
+                    # 将玩家信息添加到状态
+                    state['players'].append({
+                        'id': player_dict.get('id', i),
+                        'name': player_dict.get('name', f'未命名{i}'),
+                        'color': player_dict.get('color', (255,0,0)),
+                        'position': position,
+                        'floor': floor,
+                        'daze': player_dict.get('daze', 0),
+                        'dice_value': int(dice_value) if dice_value is not None else 0
+                    })
+                else:
+                    # 打印每个玩家的位置信息，帮助调试
+                    print(f"玩家{i+1} {player.name} 的位置: {player.pos}, 楼层: {player.floor}, 骰子值: {player.dice_value}")
+                    
+                    # 将Python的None转换为null，以便在前端能够正确处理
+                    position = player.pos if player.pos is not None else None
+                    
+                    # 获取玩家骰子值，确保数值类型
+                    player_dice_value = int(player.dice_value) if player.dice_value is not None else 0
+                    
+                    state['players'].append({
+                        'id': player.id,
+                        'name': player.name,
+                        'color': player.color,
+                        'position': position,
+                        'floor': player.floor,
+                        'daze': player.daze,
+                        'dice_value': player_dice_value  # 确保骰子值为整数
+                    })
+            
+            # 添加棋盘信息
+            state['board'] = self.get_board_state()
+            
+            return state
+            
+        except Exception as e:
+            import traceback
+            print(f"获取游戏状态时出错: {str(e)}")
+            traceback.print_exc()
+            
+            # 返回最小有效状态，避免前端崩溃
+            return {
+                'current_player': 0,
+                'dice_value': 0,
+                'phase': 'roll_dice',
+                'current_floor': 1,
+                'selecting_start': False,
+                'moved': False,
+                'players': [{'id': 0, 'name': '恢复中...', 'color': (255,0,0), 'position': None, 'floor': 1, 'daze': 0, 'dice_value': 0}],
+                'board': {'floors': {1: [{'x': 10, 'y': 10, 'status': 1}]}}
+            }
     
     def get_board_state(self):
         """获取棋盘状态
@@ -220,27 +335,72 @@ class GameAdapter:
                 result['message'] = '已强制结束初始位置选择阶段，游戏正式开始！'
                 print("强制结束初始位置选择阶段，游戏开始")
             
-            # 检查当前玩家是否还有剩余骰子值
+            # 确保current_player是Player对象而不是dict
             current_player = self.game.players[self.game.current_player_index]
-            if current_player.dice_value > 0:
-                result['message'] = '本回合已经掷过骰子，请先完成移动'
+            
+            try:
+                # 处理current_player是字典的情况
+                if isinstance(current_player, dict):
+                    print(f"警告: 在roll_dice事件中，current_player是字典而不是Player对象: {current_player}")
+                    # 尝试从字典中提取数据并创建一个Player对象
+                    from core.player import Player
+                    player_id = current_player.get('id', self.game.current_player_index)
+                    player_name = current_player.get('name', f"玩家{player_id+1}")
+                    player_color = current_player.get('color', (255,0,0))
+                    player_obj = Player(player_id, player_name, player_color)
+                    
+                    # 同步其他属性
+                    if 'position' in current_player and current_player['position']:
+                        player_obj.set_position(*current_player['position'])
+                    if 'dice_value' in current_player:
+                        player_obj.set_dice_value(current_player['dice_value'])
+                    if 'floor' in current_player:
+                        player_obj.floor = current_player['floor']
+                    if 'daze' in current_player:
+                        player_obj.daze = current_player['daze']
+                    
+                    # 更新players列表中的元素
+                    self.game.players[self.game.current_player_index] = player_obj
+                    current_player = player_obj
+                    print(f"已将字典转换为Player对象: id={player_obj.id}, name={player_obj.name}")
+                
+                # 确保玩家对象有dice_value属性和方法
+                if not hasattr(current_player, 'dice_value'):
+                    print(f"警告: Player对象缺少dice_value属性")
+                    current_player.dice_value = 0
+                
+                if not hasattr(current_player, 'set_dice_value'):
+                    print(f"警告: Player对象缺少set_dice_value方法")
+                    current_player.set_dice_value = lambda value: setattr(current_player, 'dice_value', value)
+                
+                # 检查当前玩家是否还有剩余骰子值
+                dice_value_check = getattr(current_player, 'dice_value', 0)
+                if dice_value_check > 0:
+                    result['message'] = '本回合已经掷过骰子，请先完成移动'
+                    return result
+                
+                # 生成一个新的骰子值
+                dice_value = random.randint(1, 6)
+                
+                # 同步更新当前玩家和游戏的骰子值
+                current_player.set_dice_value(dice_value)  # 设置玩家的骰子值
+                self.game.dice_value = dice_value  # 保持Game对象状态一致
+                
+                print(f"掷骰子成功，点数为: {dice_value}, 玩家骰子值为: {current_player.dice_value}, 游戏骰子值为: {self.game.dice_value}")
+                
+                result['success'] = True
+                result['message'] = f'掷出了{dice_value}点'
+                result['dice_value'] = dice_value
+                result['player_index'] = self.game.current_player_index
+                
                 return result
-            
-            # 生成一个新的骰子值
-            dice_value = random.randint(1, 6)
-            
-            # 同步更新当前玩家和游戏的骰子值
-            current_player.set_dice_value(dice_value)  # 设置玩家的骰子值
-            self.game.dice_value = dice_value  # 保持Game对象状态一致
-            
-            print(f"掷骰子成功，点数为: {dice_value}, 玩家骰子值为: {current_player.dice_value}, 游戏骰子值为: {self.game.dice_value}")
-            
-            result['success'] = True
-            result['message'] = f'掷出了{dice_value}点'
-            result['dice_value'] = dice_value
-            result['player_index'] = self.game.current_player_index
-            
-            return result
+                
+            except Exception as e:
+                import traceback
+                print(f"处理掷骰子事件时出错: {str(e)}")
+                traceback.print_exc()
+                result['message'] = f'掷骰子时出错: {str(e)}'
+                return result
         
         elif event_type == 'select_start_position':
             # 检查是否处于起始位置选择阶段
@@ -274,7 +434,21 @@ class GameAdapter:
                             
                     if not position_taken:
                         # 设置当前玩家的初始位置
-                        current_player = self.game.current_player
+                        if hasattr(self.game, 'current_player'):
+                            if isinstance(self.game.current_player, dict):
+                                print(f"警告: self.game.current_player 是字典而不是 Player 对象: {self.game.current_player}")
+                                # 使用players列表和current_player_index获取当前玩家
+                                current_player = self.game.players[self.game.current_player_index]
+                            elif isinstance(self.game.current_player, int):
+                                print(f"警告: self.game.current_player 是整数而不是 Player 对象: {self.game.current_player}")
+                                # 使用players列表和current_player作为索引
+                                current_player = self.game.players[self.game.current_player]
+                            else:
+                                current_player = self.game.current_player
+                        else:
+                            print(f"警告: self.game 没有 current_player 属性，使用 current_player_index 获取当前玩家")
+                            current_player = self.game.players[self.game.current_player_index]
+                        
                         player_name = current_player.name
                         print(f"设置玩家 {player_name} 的初始位置为 ({x},{y})")
                         
@@ -461,7 +635,22 @@ class GameAdapter:
                 return result
             
             change = data['change']
-            player = self.game.current_player
+            # 检查 current_player 的类型
+            if hasattr(self.game, 'current_player'):
+                if isinstance(self.game.current_player, dict):
+                    print(f"警告: self.game.current_player 是字典而不是 Player 对象: {self.game.current_player}")
+                    # 使用players列表和current_player_index获取当前玩家
+                    player = self.game.players[self.game.current_player_index]
+                elif isinstance(self.game.current_player, int):
+                    print(f"警告: self.game.current_player 是整数而不是 Player 对象: {self.game.current_player}")
+                    # 使用players列表和current_player作为索引
+                    player = self.game.players[self.game.current_player]
+                else:
+                    player = self.game.current_player
+            else:
+                print(f"警告: self.game 没有 current_player 属性，使用 current_player_index 获取当前玩家")
+                player = self.game.players[self.game.current_player_index]
+                
             player.daze = max(0, min(10, player.daze + change))  # 限制在0-10之间
             result['success'] = True
 

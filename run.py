@@ -33,7 +33,7 @@ if __name__ == "__main__":
     print(f"启动服务器: {'开发模式' if debug else '生产模式'}")
     print(f"监听地址: {host}:{port}")
     print("访问URL: http://{0}:{1}".format(
-        'localhost' if host == '0.0.0.0' else host, 
+        'localhost' if host == '127.0.0.1' else host, 
         port
     ))
     
