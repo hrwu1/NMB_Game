@@ -169,7 +169,7 @@ class GameAdapter:
         """获取棋盘状态
         
         Returns:
-            棋盘状态字典
+            棋盘状态字典，包含已放置的瓦片和未铺设区域
         """
         board = {
             'floors': {}
@@ -205,13 +205,34 @@ class GameAdapter:
                     return board
             
             # 获取所有楼层的棋盘状态
-            for floor in range(FLOOR_NUM):  # 使用正确的FLOOR_NUM常量
-                tiles = []
+            for floor in range(FLOOR_NUM):
+                tiles = []  # 可通行的白色格子
                 tile_count = 0
                 special_count = 0
                 
-                # 获取该楼层的所有有效区块
-                for y in range(MAP_SIZE * REGION_SIZE):  # 使用正确的MAP_SIZE和REGION_SIZE常量
+                # 记录已放置和未放置但可放置的区域
+                placed_regions = []
+                placeable_regions = []
+                
+                # 首先收集所有已放置区域
+                for region_x, region_y in self.game.tile_system.placed_regions[floor]:
+                    placed_regions.append({
+                        'x': region_x,
+                        'y': region_y
+                    })
+                
+                # 然后确定所有可放置但未放置的区域（所有区域除了已放置的）
+                for region_x in range(MAP_SIZE):
+                    for region_y in range(MAP_SIZE):
+                        # 如果区域未放置，加入可放置区域列表
+                        if (region_x, region_y) not in self.game.tile_system.placed_regions[floor]:
+                            placeable_regions.append({
+                                'x': region_x,
+                                'y': region_y
+                            })
+                
+                # 获取该楼层的所有有效格子
+                for y in range(MAP_SIZE * REGION_SIZE):
                     for x in range(MAP_SIZE * REGION_SIZE):
                         try:
                             # 获取普通格子状态
@@ -236,25 +257,21 @@ class GameAdapter:
                         except Exception as e:
                             print(f"获取瓦片状态时出错 - x={x}, y={y}, floor={floor}: {str(e)}")
                 
-                # 获取已放置区域信息
-                placed_regions = []
-                for region_x, region_y in self.game.tile_system.placed_regions[floor]:
-                    placed_regions.append({
-                        'x': region_x,
-                        'y': region_y
-                    })
-                
-                print(f"楼层 {floor} 包含 {tile_count} 个有效瓦片，{special_count} 个特殊瓦片，{len(placed_regions)} 个已放置区域")
+                print(f"楼层 {floor} 包含 {tile_count} 个有效瓦片，{special_count} 个特殊瓦片")
+                print(f"楼层 {floor} 包含 {len(placed_regions)} 个已放置区域，{len(placeable_regions)} 个可放置区域")
                 
                 # 将完整的楼层信息添加到结果中
                 board['floors'][floor] = {
                     'tiles': tiles,
-                    'placed_regions': placed_regions
+                    'placed_regions': placed_regions,
+                    'placeable_regions': placeable_regions
                 }
                 
             # 添加游戏中的其他相关信息到棋盘状态
             board['current_floor'] = self.game.current_floor
             board['total_floors'] = FLOOR_NUM
+            board['map_size'] = MAP_SIZE
+            board['region_size'] = REGION_SIZE
             
             print(f"获取棋盘状态完成 - 总共 {len(board['floors'])} 个楼层")
             
@@ -266,20 +283,48 @@ class GameAdapter:
             # 返回一个最小的有效棋盘
             from core.constants import FLOOR_NUM  # 确保导入常量
             
-            # 每个楼层至少有三个相邻的瓦片和一个放置区域
+            # 创建一个中心区域有有效瓦片的简单棋盘
             for floor in range(FLOOR_NUM):
+                # 计算中心区域的位置
+                center_x, center_y = MAP_SIZE // 2, MAP_SIZE // 2
+                
+                # 中心区域的瓦片
+                center_tiles = []
+                for dy in range(REGION_SIZE):
+                    for dx in range(REGION_SIZE):
+                        center_tiles.append({
+                            'x': center_x * REGION_SIZE + dx,
+                            'y': center_y * REGION_SIZE + dy,
+                            'status': 1
+                        })
+                
+                # 添加已放置区域（只有中心区域）
+                placed_regions = [{
+                    'x': center_x,
+                    'y': center_y
+                }]
+                
+                # 添加可放置区域（除中心区域外的所有区域）
+                placeable_regions = []
+                for rx in range(MAP_SIZE):
+                    for ry in range(MAP_SIZE):
+                        if rx != center_x or ry != center_y:
+                            placeable_regions.append({
+                                'x': rx,
+                                'y': ry
+                            })
+                
                 board['floors'][floor] = {
-                    'tiles': [
-                        {'x': 10, 'y': 10, 'status': 1}, 
-                        {'x': 11, 'y': 10, 'status': 1},
-                        {'x': 10, 'y': 11, 'status': 1}
-                    ],
-                    'placed_regions': [{'x': 2, 'y': 2}]
+                    'tiles': center_tiles,
+                    'placed_regions': placed_regions,
+                    'placeable_regions': placeable_regions
                 }
             
             # 确保返回当前楼层和总楼层数信息
             board['current_floor'] = self.game.current_floor if hasattr(self.game, 'current_floor') else 1
             board['total_floors'] = FLOOR_NUM
+            board['map_size'] = MAP_SIZE
+            board['region_size'] = REGION_SIZE
             
             print(f"已创建紧急备用的最小有效棋盘")
         

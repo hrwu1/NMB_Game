@@ -85,32 +85,22 @@ class PathTileSystem:
         return unplaced
     
     def initialize_center_region(self):
-        """Initialize the center region with a path tile"""
+        """初始化中央区域，只初始化地图中心的一个4×4区域"""
+        # 计算中心区域的位置
         center_x, center_y = MAP_SIZE // 2, MAP_SIZE // 2
         
-        # 使用全白色瓦片初始化中央区域
-        card = 0xFFFF  # 所有瓦片都是白色
+        # 使用全白色瓦片初始化中央区域（全1表示所有格子都是白色可通行的）
+        card = 0xFFFF  # 16位全为1，表示4×4区域内所有格子都是白色
         
-        # 在第1层（楼层索引为1）的中央区域放置卡片
+        # 在第1层（索引为1）的中央区域放置卡片
         self.place_card(card, center_x, center_y, 1, 0)
         
         # 确保该区域被标记为已放置
         self.placed_regions[1].add((center_x, center_y))
         
-        # 为了方便初始位置选择，在中央区域周围也放置一些全白色卡片
-        for dx in [-1, 0, 1]:
-            for dy in [-1, 0, 1]:
-                if dx == 0 and dy == 0:
-                    continue  # 中央区域已经放置过了
-                
-                nx, ny = center_x + dx, center_y + dy
-                # 确保坐标在有效范围内
-                if 0 <= nx < MAP_SIZE and 0 <= ny < MAP_SIZE:
-                    # 放置全白色卡片
-                    self.place_card(card, nx, ny, 1, 0)
-                    self.placed_regions[1].add((nx, ny))
+        # 不再初始化周围区域，只保留中央的一个4×4区域
         
-        print(f"初始化中央区域完成：在楼层1的({center_x}, {center_y})位置放置了初始卡片")
+        print(f"初始化中央区域完成：在楼层1的中心位置({center_x}, {center_y})放置了初始卡片")
         print(f"楼层1已放置区域: {self.placed_regions[1]}")
         print(f"楼层0已放置区域: {self.placed_regions[0]}")
     

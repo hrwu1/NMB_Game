@@ -2,6 +2,10 @@
 document.addEventListener('DOMContentLoaded', () => {
     console.log('=== 页面加载完成，初始化游戏 ===');
     
+    // 游戏常量
+    const ACTUAL_BOARD_SIZE = 20;  // 实际的棋盘大小（20x20）
+    const TILE_SIZE = 30;  // 每个格子的像素大小
+    
     // 检查服务器提供的游戏ID
     console.log('游戏ID (从服务器):', GAME_ID);
     
@@ -107,7 +111,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const playerTokens = []; // 玩家标记
     
     // 常量
-    const TILE_SIZE = 40;
     const BOARD_SIZE = 20;
     const REGION_SIZE = 4; // 每个区域包含的瓦片数量
     const PLAYER_COLORS = [
@@ -511,31 +514,34 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
         console.log('开始绘制棋盘...');
         
-        // 绘制网格
-        const offsetX = (gameCanvas.width - BOARD_SIZE * TILE_SIZE) / 2;
-        const offsetY = (gameCanvas.height - BOARD_SIZE * TILE_SIZE) / 2;
+        // 计算实际的棋盘大小（20x20）
+        const ACTUAL_BOARD_SIZE = 20;  // 新的棋盘大小为20x20
+        
+        // 计算新的偏移量，使棋盘居中
+        const offsetX = (gameCanvas.width - ACTUAL_BOARD_SIZE * TILE_SIZE) / 2;
+        const offsetY = (gameCanvas.height - ACTUAL_BOARD_SIZE * TILE_SIZE) / 2;
         
         // 绘制棋盘背景
         ctx.fillStyle = '#3f3f5a';
-        ctx.fillRect(offsetX, offsetY, BOARD_SIZE * TILE_SIZE, BOARD_SIZE * TILE_SIZE);
+        ctx.fillRect(offsetX, offsetY, ACTUAL_BOARD_SIZE * TILE_SIZE, ACTUAL_BOARD_SIZE * TILE_SIZE);
         
         // 绘制网格线
         ctx.strokeStyle = '#2d2d42';
         ctx.lineWidth = 1;
         
         // 水平线
-        for (let i = 0; i <= BOARD_SIZE; i++) {
+        for (let i = 0; i <= ACTUAL_BOARD_SIZE; i++) {
             ctx.beginPath();
             ctx.moveTo(offsetX, offsetY + i * TILE_SIZE);
-            ctx.lineTo(offsetX + BOARD_SIZE * TILE_SIZE, offsetY + i * TILE_SIZE);
+            ctx.lineTo(offsetX + ACTUAL_BOARD_SIZE * TILE_SIZE, offsetY + i * TILE_SIZE);
             ctx.stroke();
         }
         
         // 垂直线
-        for (let i = 0; i <= BOARD_SIZE; i++) {
+        for (let i = 0; i <= ACTUAL_BOARD_SIZE; i++) {
             ctx.beginPath();
             ctx.moveTo(offsetX + i * TILE_SIZE, offsetY);
-            ctx.lineTo(offsetX + i * TILE_SIZE, offsetY + BOARD_SIZE * TILE_SIZE);
+            ctx.lineTo(offsetX + i * TILE_SIZE, offsetY + ACTUAL_BOARD_SIZE * TILE_SIZE);
             ctx.stroke();
         }
         
@@ -598,164 +604,221 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
         
-        // 绘制棋盘瓦片
-        const floorTiles = gameState.board.floors[currentFloorValue];
-        if (floorTiles) {
-            // 检查新的数据格式
-            const tiles = floorTiles.tiles || floorTiles;
-            console.log(`绘制楼层${currentFloorValue}的瓦片 - 数量: ${tiles.length}`);
+        // 获取当前楼层数据
+        const floorData = gameState.board.floors[currentFloorValue];
+        if (!floorData) {
+            console.error(`当前楼层${currentFloorValue}没有数据!`);
+            return;
+        }
+        
+        // 首先绘制区域边界和背景
+        const mapSize = gameState.board.map_size || 5;
+        const regionSize = gameState.board.region_size || 4;
+        
+        // 绘制区域边界
+        ctx.strokeStyle = '#6a6a8a';
+        ctx.lineWidth = 2;
+        for (let i = 0; i <= mapSize; i++) {
+            // 垂直线
+            ctx.beginPath();
+            ctx.moveTo(offsetX + i * regionSize * TILE_SIZE, offsetY);
+            ctx.lineTo(offsetX + i * regionSize * TILE_SIZE, offsetY + ACTUAL_BOARD_SIZE * TILE_SIZE);
+            ctx.stroke();
             
-            // 首先绘制已放置区域的背景颜色
-            if (floorTiles.placed_regions) {
-                console.log(`绘制已放置区域 - 数量: ${floorTiles.placed_regions.length}`);
-                ctx.fillStyle = '#4a4a6a'; // 区域背景颜色
-                
-                floorTiles.placed_regions.forEach(region => {
-                    const regionX = region.x;
-                    const regionY = region.y;
-                    // 绘制区域背景
-                    ctx.fillRect(
-                        offsetX + regionX * REGION_SIZE * TILE_SIZE, 
-                        offsetY + regionY * REGION_SIZE * TILE_SIZE, 
-                        REGION_SIZE * TILE_SIZE, 
-                        REGION_SIZE * TILE_SIZE
-                    );
-                    
-                    // 绘制区域边框
-                    ctx.strokeStyle = '#6a6a8a';
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(
-                        offsetX + regionX * REGION_SIZE * TILE_SIZE, 
-                        offsetY + regionY * REGION_SIZE * TILE_SIZE, 
-                        REGION_SIZE * TILE_SIZE, 
-                        REGION_SIZE * TILE_SIZE
-                    );
-                });
-            }
+            // 水平线
+            ctx.beginPath();
+            ctx.moveTo(offsetX, offsetY + i * regionSize * TILE_SIZE);
+            ctx.lineTo(offsetX + ACTUAL_BOARD_SIZE * TILE_SIZE, offsetY + i * regionSize * TILE_SIZE);
+            ctx.stroke();
+        }
+        
+        // 检查新的数据格式
+        const tiles = floorData.tiles || [];
+        
+        // 绘制未铺设但可放置的区域
+        if (floorData.placeable_regions && floorData.placeable_regions.length > 0) {
+            console.log(`绘制${floorData.placeable_regions.length}个可放置区域`);
+            ctx.fillStyle = '#4a4a6a'; // 未铺设区域的颜色
             
-            // 然后绘制具体的瓦片
-            tiles.forEach(tile => {
-                const x = tile.x;
-                const y = tile.y;
+            floorData.placeable_regions.forEach(region => {
+                const regionX = region.x;
+                const regionY = region.y;
                 
-                // 根据瓦片状态设置颜色
-                let tileColor;
-                
-                if (gameState.selecting_start && tile.status) {
-                    // 初始位置选择阶段的白色瓦片
-                    tileColor = '#ffffff';  // 纯白色
-                } else {
-                    switch (tile.status) {
-                        case 1: // 普通路径
-                            tileColor = '#8a8aa5';
-                            break;
-                        case 2: // 特殊路径
-                            tileColor = '#c4c4e0';
-                            break;
-                        case 3: // 可购买地块
-                            tileColor = '#ffd700'; // 金色
-                            break;
-                        default:
-                            tileColor = '#5a5a77';
-                    }
-                }
-                
-                // 检查是否是特殊瓦片
-                if (tile.special) {
-                    switch(tile.special) {
-                        case 'stairs':
-                            tileColor = '#00cccc'; // 青色为楼梯
-                            break;
-                        case 'elevator':
-                            tileColor = '#cc00cc'; // 紫色为电梯
-                            break;
-                        default:
-                            // 保持原色
-                            break;
-                    }
-                }
-                
-                // 检查是否是可移动的格子 - 使用some方法更安全
-                const isMovable = movableTiles.some(pos => pos[0] === x && pos[1] === y);
-                
-                if (isMovable) {
-                    // 高亮显示可移动的格子
-                    tileColor = '#66ff66'; // 亮绿色
-                }
-                
-                // 绘制瓦片
-                ctx.fillStyle = tileColor;
+                // 绘制区域背景 - 略淡一些表示未铺设
+                ctx.globalAlpha = 0.6;
                 ctx.fillRect(
-                    offsetX + x * TILE_SIZE + 1, 
-                    offsetY + y * TILE_SIZE + 1, 
-                    TILE_SIZE - 2, 
-                    TILE_SIZE - 2
+                    offsetX + regionX * regionSize * TILE_SIZE,
+                    offsetY + regionY * regionSize * TILE_SIZE,
+                    regionSize * TILE_SIZE,
+                    regionSize * TILE_SIZE
+                );
+                ctx.globalAlpha = 1.0;
+                
+                // 绘制"未铺设"标识
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '14px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(
+                    '未铺设',
+                    offsetX + (regionX * regionSize + regionSize/2) * TILE_SIZE,
+                    offsetY + (regionY * regionSize + regionSize/2) * TILE_SIZE
+                );
+                ctx.fillStyle = '#4a4a6a'; // 恢复未铺设区域的颜色
+            });
+        }
+        
+        // 绘制已放置区域
+        if (floorData.placed_regions && floorData.placed_regions.length > 0) {
+            console.log(`绘制${floorData.placed_regions.length}个已放置区域`);
+            ctx.fillStyle = '#5a5a77'; // 已放置区域的颜色
+            
+            floorData.placed_regions.forEach(region => {
+                const regionX = region.x;
+                const regionY = region.y;
+                
+                // 绘制区域背景
+                ctx.fillRect(
+                    offsetX + regionX * regionSize * TILE_SIZE,
+                    offsetY + regionY * regionSize * TILE_SIZE,
+                    regionSize * TILE_SIZE,
+                    regionSize * TILE_SIZE
                 );
                 
-                // 绘制特殊瓦片图标
-                if (tile.special) {
-                    const centerX = offsetX + (x + 0.5) * TILE_SIZE;
-                    const centerY = offsetY + (y + 0.5) * TILE_SIZE;
-                    
-                    if (tile.special === 'stairs') {
-                        // 绘制楼梯图标
-                        ctx.strokeStyle = '#ffffff';
-                        ctx.lineWidth = 2;
-                        for (let i = 0; i < 3; i++) {
-                            // 绘制三条水平线表示楼梯
-                            const lineY = centerY - TILE_SIZE/4 + i * TILE_SIZE/4;
-                            ctx.beginPath();
-                            ctx.moveTo(centerX - TILE_SIZE/3, lineY);
-                            ctx.lineTo(centerX + TILE_SIZE/3, lineY);
-                            ctx.stroke();
-                        }
-                    } else if (tile.special === 'elevator') {
-                        // 绘制电梯图标
-                        ctx.strokeStyle = '#ffffff';
-                        ctx.lineWidth = 2;
-                        
-                        // 电梯箱
-                        ctx.strokeRect(
-                            centerX - TILE_SIZE/3,
-                            centerY - TILE_SIZE/3,
-                            TILE_SIZE/1.5,
-                            TILE_SIZE/1.5
-                        );
-                        
-                        // 上下箭头
+                // 绘制区域编号或标识
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(
+                    `区域(${regionX},${regionY})`,
+                    offsetX + (regionX * regionSize + regionSize/2) * TILE_SIZE,
+                    offsetY + (regionY * regionSize + regionSize/2) * TILE_SIZE - 10
+                );
+                ctx.fillStyle = '#5a5a77'; // 恢复已放置区域的颜色
+            });
+        }
+        
+        // 绘制具体的瓦片（白色可通行区域）
+        console.log(`绘制${tiles.length}个瓦片`);
+        tiles.forEach(tile => {
+            const x = tile.x;
+            const y = tile.y;
+            
+            // 根据瓦片状态设置颜色
+            let tileColor;
+            
+            if (gameState.selecting_start && tile.status) {
+                // 初始位置选择阶段的白色瓦片
+                tileColor = '#ffffff';  // 纯白色
+            } else {
+                switch (tile.status) {
+                    case 1: // 普通路径
+                        tileColor = '#8a8aa5';
+                        break;
+                    case 2: // 特殊路径
+                        tileColor = '#c4c4e0';
+                        break;
+                    case 3: // 可购买地块
+                        tileColor = '#ffd700'; // 金色
+                        break;
+                    default:
+                        tileColor = '#5a5a77';
+                }
+            }
+            
+            // 检查是否是特殊瓦片
+            if (tile.special) {
+                switch(tile.special) {
+                    case 'stairs':
+                        tileColor = '#00cccc'; // 青色为楼梯
+                        break;
+                    case 'elevator':
+                        tileColor = '#cc00cc'; // 紫色为电梯
+                        break;
+                    default:
+                        // 保持原色
+                        break;
+                }
+            }
+            
+            // 检查是否是可移动的格子
+            const isMovable = movableTiles.some(pos => pos[0] === x && pos[1] === y);
+            if (isMovable) {
+                // 高亮显示可移动的格子
+                tileColor = '#66ff66'; // 亮绿色
+            }
+            
+            // 绘制瓦片
+            ctx.fillStyle = tileColor;
+            ctx.fillRect(
+                offsetX + x * TILE_SIZE + 1, 
+                offsetY + y * TILE_SIZE + 1, 
+                TILE_SIZE - 2, 
+                TILE_SIZE - 2
+            );
+            
+            // 绘制特殊瓦片图标
+            if (tile.special) {
+                const centerX = offsetX + (x + 0.5) * TILE_SIZE;
+                const centerY = offsetY + (y + 0.5) * TILE_SIZE;
+                
+                if (tile.special === 'stairs') {
+                    // 绘制楼梯图标
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    for (let i = 0; i < 3; i++) {
+                        // 绘制三条水平线表示楼梯
+                        const lineY = centerY - TILE_SIZE/4 + i * TILE_SIZE/4;
                         ctx.beginPath();
-                        // 上箭头
-                        ctx.moveTo(centerX, centerY - TILE_SIZE/6);
-                        ctx.lineTo(centerX - TILE_SIZE/6, centerY);
-                        ctx.moveTo(centerX, centerY - TILE_SIZE/6);
-                        ctx.lineTo(centerX + TILE_SIZE/6, centerY);
-                        // 下箭头
-                        ctx.moveTo(centerX, centerY + TILE_SIZE/6);
-                        ctx.lineTo(centerX - TILE_SIZE/6, centerY);
-                        ctx.moveTo(centerX, centerY + TILE_SIZE/6);
-                        ctx.lineTo(centerX + TILE_SIZE/6, centerY);
+                        ctx.moveTo(centerX - TILE_SIZE/3, lineY);
+                        ctx.lineTo(centerX + TILE_SIZE/3, lineY);
                         ctx.stroke();
                     }
-                }
-                
-                // 如果是可移动的格子，添加特殊标记
-                if (isMovable) {
-                    // 绘制一个圆形标记
-                    ctx.fillStyle = '#33cc33';  // 深绿色
-                    ctx.beginPath();
-                    ctx.arc(
-                        offsetX + (x + 0.5) * TILE_SIZE,
-                        offsetY + (y + 0.5) * TILE_SIZE,
-                        TILE_SIZE / 4,
-                        0,
-                        Math.PI * 2
+                } else if (tile.special === 'elevator') {
+                    // 绘制电梯图标
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    
+                    // 电梯箱
+                    ctx.strokeRect(
+                        centerX - TILE_SIZE/3,
+                        centerY - TILE_SIZE/3,
+                        TILE_SIZE/1.5,
+                        TILE_SIZE/1.5
                     );
-                    ctx.fill();
+                    
+                    // 上下箭头
+                    ctx.beginPath();
+                    // 上箭头
+                    ctx.moveTo(centerX, centerY - TILE_SIZE/6);
+                    ctx.lineTo(centerX - TILE_SIZE/6, centerY);
+                    ctx.moveTo(centerX, centerY - TILE_SIZE/6);
+                    ctx.lineTo(centerX + TILE_SIZE/6, centerY);
+                    // 下箭头
+                    ctx.moveTo(centerX, centerY + TILE_SIZE/6);
+                    ctx.lineTo(centerX - TILE_SIZE/6, centerY);
+                    ctx.moveTo(centerX, centerY + TILE_SIZE/6);
+                    ctx.lineTo(centerX + TILE_SIZE/6, centerY);
+                    ctx.stroke();
                 }
-            });
-        } else {
-            console.error(`当前楼层${currentFloorValue}没有瓦片数据!`);
-        }
+            }
+            
+            // 如果是可移动的格子，添加特殊标记
+            if (isMovable) {
+                // 绘制一个圆形标记
+                ctx.fillStyle = '#33cc33';  // 深绿色
+                ctx.beginPath();
+                ctx.arc(
+                    offsetX + (x + 0.5) * TILE_SIZE,
+                    offsetY + (y + 0.5) * TILE_SIZE,
+                    TILE_SIZE / 4,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fill();
+            }
+        });
         
         // 绘制选中的瓦片
         if (selectedTile) {
@@ -863,20 +926,20 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         }
         
-        const floorTiles = gameState.board.floors[currentFloorValue];
-        if (!floorTiles) {
+        const floorData = gameState.board.floors[currentFloorValue];
+        if (!floorData) {
             return false;
         }
         
-        // 检查是否使用新的数据格式
-        if (floorTiles.tiles) {
-            // 新数据格式: 格子存储在tiles数组中
-            return floorTiles.tiles.some(tile => 
+        // 检查新的数据格式
+        if (floorData.tiles) {
+            // 新格式：检查给定坐标是否在tiles数组中存在
+            return floorData.tiles.some(tile => 
                 tile.x === x && tile.y === y && tile.status > 0
             );
         } else {
-            // 旧数据格式: 格子直接存储在floorTiles数组中
-            return floorTiles.some(tile => 
+            // 旧格式：直接检查floorData中是否有该坐标
+            return floorData.some(tile => 
                 tile.x === x && tile.y === y && tile.status > 0
             );
         }
@@ -1184,14 +1247,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // 获取鼠标在棋盘上的位置
     function getBoardPosition(e) {
         const rect = gameCanvas.getBoundingClientRect();
-        const offsetX = (gameCanvas.width - BOARD_SIZE * TILE_SIZE) / 2;
-        const offsetY = (gameCanvas.height - BOARD_SIZE * TILE_SIZE) / 2;
+        const ACTUAL_BOARD_SIZE = 20;  // 使用实际的棋盘大小
+        const offsetX = (gameCanvas.width - ACTUAL_BOARD_SIZE * TILE_SIZE) / 2;
+        const offsetY = (gameCanvas.height - ACTUAL_BOARD_SIZE * TILE_SIZE) / 2;
         
         const x = Math.floor((e.clientX - rect.left - offsetX) / TILE_SIZE);
         const y = Math.floor((e.clientY - rect.top - offsetY) / TILE_SIZE);
         
         // 确保位置在棋盘内
-        if (x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE) {
+        if (x >= 0 && x < ACTUAL_BOARD_SIZE && y >= 0 && y < ACTUAL_BOARD_SIZE) {
             return [x, y];
         }
         
