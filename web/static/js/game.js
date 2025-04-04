@@ -615,56 +615,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const mapSize = gameState.board.map_size || 5;
         const regionSize = gameState.board.region_size || 4;
         
-        // 绘制区域边界
-        ctx.strokeStyle = '#6a6a8a';
-        ctx.lineWidth = 2;
-        for (let i = 0; i <= mapSize; i++) {
-            // 垂直线
-            ctx.beginPath();
-            ctx.moveTo(offsetX + i * regionSize * TILE_SIZE, offsetY);
-            ctx.lineTo(offsetX + i * regionSize * TILE_SIZE, offsetY + ACTUAL_BOARD_SIZE * TILE_SIZE);
-            ctx.stroke();
-            
-            // 水平线
-            ctx.beginPath();
-            ctx.moveTo(offsetX, offsetY + i * regionSize * TILE_SIZE);
-            ctx.lineTo(offsetX + ACTUAL_BOARD_SIZE * TILE_SIZE, offsetY + i * regionSize * TILE_SIZE);
-            ctx.stroke();
-        }
-        
-        // 检查新的数据格式
-        const tiles = floorData.tiles || [];
-        
         // 绘制未铺设但可放置的区域
         if (floorData.placeable_regions && floorData.placeable_regions.length > 0) {
             console.log(`绘制${floorData.placeable_regions.length}个可放置区域`);
-            ctx.fillStyle = '#4a4a6a'; // 未铺设区域的颜色
             
             floorData.placeable_regions.forEach(region => {
                 const regionX = region.x;
                 const regionY = region.y;
                 
-                // 绘制区域背景 - 略淡一些表示未铺设
-                ctx.globalAlpha = 0.6;
+                // 根据区域位置计算颜色深浅
+                const baseColor = 42; // 基础颜色值
+                const colorVariation = ((regionX + regionY) % 2) * 5; // 根据位置产生细微的颜色变化
+                const color = `rgb(${baseColor + colorVariation}, ${baseColor + colorVariation}, ${baseColor + colorVariation + 10})`;
+                ctx.fillStyle = color;
+                
+                // 绘制区域背景
                 ctx.fillRect(
                     offsetX + regionX * regionSize * TILE_SIZE,
                     offsetY + regionY * regionSize * TILE_SIZE,
                     regionSize * TILE_SIZE,
                     regionSize * TILE_SIZE
                 );
-                ctx.globalAlpha = 1.0;
-                
-                // 绘制"未铺设"标识
-                ctx.fillStyle = '#ffffff';
-                ctx.font = '14px Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(
-                    '未铺设',
-                    offsetX + (regionX * regionSize + regionSize/2) * TILE_SIZE,
-                    offsetY + (regionY * regionSize + regionSize/2) * TILE_SIZE
-                );
-                ctx.fillStyle = '#4a4a6a'; // 恢复未铺设区域的颜色
             });
         }
         
@@ -685,21 +656,58 @@ document.addEventListener('DOMContentLoaded', () => {
                     regionSize * TILE_SIZE
                 );
                 
-                // 绘制区域编号或标识
-                ctx.fillStyle = '#ffffff';
-                ctx.font = '12px Arial';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(
-                    `区域(${regionX},${regionY})`,
-                    offsetX + (regionX * regionSize + regionSize/2) * TILE_SIZE,
-                    offsetY + (regionY * regionSize + regionSize/2) * TILE_SIZE - 10
-                );
-                ctx.fillStyle = '#5a5a77'; // 恢复已放置区域的颜色
+                // 绘制小格子的边界线
+                ctx.strokeStyle = '#4a4a67'; // 小格子的边界线颜色
+                ctx.lineWidth = 1;
+                
+                // 绘制区域内的小格子边界
+                for (let i = 0; i <= regionSize; i++) {
+                    // 水平线
+                    ctx.beginPath();
+                    ctx.moveTo(
+                        offsetX + regionX * regionSize * TILE_SIZE,
+                        offsetY + (regionY * regionSize + i) * TILE_SIZE
+                    );
+                    ctx.lineTo(
+                        offsetX + (regionX * regionSize + regionSize) * TILE_SIZE,
+                        offsetY + (regionY * regionSize + i) * TILE_SIZE
+                    );
+                    ctx.stroke();
+                    
+                    // 垂直线
+                    ctx.beginPath();
+                    ctx.moveTo(
+                        offsetX + (regionX * regionSize + i) * TILE_SIZE,
+                        offsetY + regionY * regionSize * TILE_SIZE
+                    );
+                    ctx.lineTo(
+                        offsetX + (regionX * regionSize + i) * TILE_SIZE,
+                        offsetY + (regionY * regionSize + regionSize) * TILE_SIZE
+                    );
+                    ctx.stroke();
+                }
             });
         }
         
+        // 绘制区域边界线
+        ctx.strokeStyle = '#3a3a5a'; // 区域边界线颜色
+        ctx.lineWidth = 2;
+        for (let i = 0; i <= mapSize; i++) {
+            // 垂直线
+            ctx.beginPath();
+            ctx.moveTo(offsetX + i * regionSize * TILE_SIZE, offsetY);
+            ctx.lineTo(offsetX + i * regionSize * TILE_SIZE, offsetY + ACTUAL_BOARD_SIZE * TILE_SIZE);
+            ctx.stroke();
+            
+            // 水平线
+            ctx.beginPath();
+            ctx.moveTo(offsetX, offsetY + i * regionSize * TILE_SIZE);
+            ctx.lineTo(offsetX + ACTUAL_BOARD_SIZE * TILE_SIZE, offsetY + i * regionSize * TILE_SIZE);
+            ctx.stroke();
+        }
+        
         // 绘制具体的瓦片（白色可通行区域）
+        const tiles = floorData.tiles || [];
         console.log(`绘制${tiles.length}个瓦片`);
         tiles.forEach(tile => {
             const x = tile.x;
@@ -861,7 +869,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (Array.isArray(player.position)) {
                         [x, y] = player.position;
                     } else if (typeof player.position === 'object' && player.position !== null) {
-                        // 如果是tuple形式的对象 {0: x, 1: y}
                         x = player.position[0];
                         y = player.position[1];
                     }
@@ -888,12 +895,15 @@ document.addEventListener('DOMContentLoaded', () => {
                             ctx.fill();
                         }
                         
+                        // 绘制玩家标记
                         ctx.fillStyle = PLAYER_COLORS[player.id];
                         ctx.beginPath();
                         ctx.arc(
-                            offsetX + (x + 0.5) * TILE_SIZE, 
-                            offsetY + (y + 0.5) * TILE_SIZE, 
-                            TILE_SIZE / 3, 0, Math.PI * 2
+                            offsetX + (x + 0.5) * TILE_SIZE,
+                            offsetY + (y + 0.5) * TILE_SIZE,
+                            TILE_SIZE / 3,
+                            0,
+                            Math.PI * 2
                         );
                         ctx.fill();
                         
