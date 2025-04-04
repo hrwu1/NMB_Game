@@ -109,6 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 常量
     const TILE_SIZE = 40;
     const BOARD_SIZE = 20;
+    const REGION_SIZE = 4; // 每个区域包含的瓦片数量
     const PLAYER_COLORS = [
         '#ff0000', // 红色
         '#00ff00', // 绿色
@@ -600,8 +601,40 @@ document.addEventListener('DOMContentLoaded', () => {
         // 绘制棋盘瓦片
         const floorTiles = gameState.board.floors[currentFloorValue];
         if (floorTiles) {
-            console.log(`绘制楼层${currentFloorValue}的瓦片 - 数量: ${floorTiles.length}`);
-            floorTiles.forEach(tile => {
+            // 检查新的数据格式
+            const tiles = floorTiles.tiles || floorTiles;
+            console.log(`绘制楼层${currentFloorValue}的瓦片 - 数量: ${tiles.length}`);
+            
+            // 首先绘制已放置区域的背景颜色
+            if (floorTiles.placed_regions) {
+                console.log(`绘制已放置区域 - 数量: ${floorTiles.placed_regions.length}`);
+                ctx.fillStyle = '#4a4a6a'; // 区域背景颜色
+                
+                floorTiles.placed_regions.forEach(region => {
+                    const regionX = region.x;
+                    const regionY = region.y;
+                    // 绘制区域背景
+                    ctx.fillRect(
+                        offsetX + regionX * REGION_SIZE * TILE_SIZE, 
+                        offsetY + regionY * REGION_SIZE * TILE_SIZE, 
+                        REGION_SIZE * TILE_SIZE, 
+                        REGION_SIZE * TILE_SIZE
+                    );
+                    
+                    // 绘制区域边框
+                    ctx.strokeStyle = '#6a6a8a';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(
+                        offsetX + regionX * REGION_SIZE * TILE_SIZE, 
+                        offsetY + regionY * REGION_SIZE * TILE_SIZE, 
+                        REGION_SIZE * TILE_SIZE, 
+                        REGION_SIZE * TILE_SIZE
+                    );
+                });
+            }
+            
+            // 然后绘制具体的瓦片
+            tiles.forEach(tile => {
                 const x = tile.x;
                 const y = tile.y;
                 
@@ -627,6 +660,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
                 
+                // 检查是否是特殊瓦片
+                if (tile.special) {
+                    switch(tile.special) {
+                        case 'stairs':
+                            tileColor = '#00cccc'; // 青色为楼梯
+                            break;
+                        case 'elevator':
+                            tileColor = '#cc00cc'; // 紫色为电梯
+                            break;
+                        default:
+                            // 保持原色
+                            break;
+                    }
+                }
+                
                 // 检查是否是可移动的格子 - 使用some方法更安全
                 const isMovable = movableTiles.some(pos => pos[0] === x && pos[1] === y);
                 
@@ -643,6 +691,52 @@ document.addEventListener('DOMContentLoaded', () => {
                     TILE_SIZE - 2, 
                     TILE_SIZE - 2
                 );
+                
+                // 绘制特殊瓦片图标
+                if (tile.special) {
+                    const centerX = offsetX + (x + 0.5) * TILE_SIZE;
+                    const centerY = offsetY + (y + 0.5) * TILE_SIZE;
+                    
+                    if (tile.special === 'stairs') {
+                        // 绘制楼梯图标
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 2;
+                        for (let i = 0; i < 3; i++) {
+                            // 绘制三条水平线表示楼梯
+                            const lineY = centerY - TILE_SIZE/4 + i * TILE_SIZE/4;
+                            ctx.beginPath();
+                            ctx.moveTo(centerX - TILE_SIZE/3, lineY);
+                            ctx.lineTo(centerX + TILE_SIZE/3, lineY);
+                            ctx.stroke();
+                        }
+                    } else if (tile.special === 'elevator') {
+                        // 绘制电梯图标
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 2;
+                        
+                        // 电梯箱
+                        ctx.strokeRect(
+                            centerX - TILE_SIZE/3,
+                            centerY - TILE_SIZE/3,
+                            TILE_SIZE/1.5,
+                            TILE_SIZE/1.5
+                        );
+                        
+                        // 上下箭头
+                        ctx.beginPath();
+                        // 上箭头
+                        ctx.moveTo(centerX, centerY - TILE_SIZE/6);
+                        ctx.lineTo(centerX - TILE_SIZE/6, centerY);
+                        ctx.moveTo(centerX, centerY - TILE_SIZE/6);
+                        ctx.lineTo(centerX + TILE_SIZE/6, centerY);
+                        // 下箭头
+                        ctx.moveTo(centerX, centerY + TILE_SIZE/6);
+                        ctx.lineTo(centerX - TILE_SIZE/6, centerY);
+                        ctx.moveTo(centerX, centerY + TILE_SIZE/6);
+                        ctx.lineTo(centerX + TILE_SIZE/6, centerY);
+                        ctx.stroke();
+                    }
+                }
                 
                 // 如果是可移动的格子，添加特殊标记
                 if (isMovable) {
@@ -774,10 +868,18 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         }
         
-        // 检查该坐标是否在地图上有有效的瓦片
-        return floorTiles.some(tile => 
-            tile.x === x && tile.y === y && tile.status > 0
-        );
+        // 检查是否使用新的数据格式
+        if (floorTiles.tiles) {
+            // 新数据格式: 格子存储在tiles数组中
+            return floorTiles.tiles.some(tile => 
+                tile.x === x && tile.y === y && tile.status > 0
+            );
+        } else {
+            // 旧数据格式: 格子直接存储在floorTiles数组中
+            return floorTiles.some(tile => 
+                tile.x === x && tile.y === y && tile.status > 0
+            );
+        }
     }
     
     // 检查格子是否被其他玩家占用
@@ -799,6 +901,17 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (typeof player.position === 'object' && player.position !== null) {
                 playerX = player.position[0];
                 playerY = player.position[1];
+            } else if (typeof player.position === 'string') {
+                // 处理可能的字符串格式 "[x,y]"
+                try {
+                    const posArray = JSON.parse(player.position);
+                    if (Array.isArray(posArray) && posArray.length === 2) {
+                        [playerX, playerY] = posArray;
+                    }
+                } catch (e) {
+                    console.error('解析玩家位置时出错:', e);
+                    return false;
+                }
             }
             
             // 检查位置是否匹配
@@ -1068,20 +1181,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 3000);
     }
 
-    // 添加一个全局调试函数
-    window.debugDice = function(value) {
-        console.log(`手动设置骰子值为: ${value}`);
-        if (diceResult) {
-            diceResult.textContent = value;
-            if (gameState) {
-                gameState.dice_value = parseInt(value);
-                console.log('更新gameState骰子值为:', gameState.dice_value);
-                drawBoard();
-                addMoveTip();
-            }
-        }
-    };
-    
     // 获取鼠标在棋盘上的位置
     function getBoardPosition(e) {
         const rect = gameCanvas.getBoundingClientRect();
@@ -1098,34 +1197,6 @@ document.addEventListener('DOMContentLoaded', () => {
         
         return null;
     }
-    
-    // 添加调试按钮
-    const debugPanel = document.createElement('div');
-    debugPanel.style.position = 'fixed';
-    debugPanel.style.top = '10px';
-    debugPanel.style.right = '10px';
-    debugPanel.style.background = 'rgba(0,0,0,0.7)';
-    debugPanel.style.padding = '10px';
-    debugPanel.style.borderRadius = '5px';
-    debugPanel.style.zIndex = '9999';
-    
-    const debugBtn = document.createElement('button');
-    debugBtn.textContent = '强制更新骰子(3)';
-    debugBtn.onclick = function() { window.debugDice(3); };
-    
-    const refreshBtn = document.createElement('button');
-    refreshBtn.textContent = '强制刷新UI';
-    refreshBtn.onclick = function() { 
-        if (gameState) {
-            console.log('强制刷新UI');
-            updateUI();
-            drawBoard();
-        }
-    };
-    
-    debugPanel.appendChild(debugBtn);
-    debugPanel.appendChild(refreshBtn);
-    document.body.appendChild(debugPanel);
     
     // 处理棋盘点击
     gameCanvas.addEventListener('click', (e) => {

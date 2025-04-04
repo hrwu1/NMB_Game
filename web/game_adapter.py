@@ -10,6 +10,7 @@ if core_path not in sys.path:
     sys.path.append(core_path)
 
 from core.game import Game
+from core.constants import FLOOR_NUM, MAP_SIZE, REGION_SIZE  # 导入必要的常量
 
 class GameAdapter:
     """游戏适配器，用于将Pygame游戏适配到Web环境"""
@@ -185,7 +186,7 @@ class GameAdapter:
                 if not hasattr(self.game, 'tile_system') or self.game.tile_system is None:
                     print("错误: 无法初始化游戏的tile_system，返回空棋盘")
                     # 如果仍然不存在，创建一个带有简单测试瓦片的棋盘
-                    for floor in range(1, 6):
+                    for floor in range(FLOOR_NUM):
                         test_tiles = []
                         # 创建一个10x10的简单测试棋盘在中央
                         for x in range(5, 15):
@@ -197,44 +198,90 @@ class GameAdapter:
                                         'y': y,
                                         'status': 1
                                     })
-                        board['floors'][floor] = test_tiles
+                        board['floors'][floor] = {
+                            'tiles': test_tiles,
+                            'placed_regions': []  # 添加空的放置区域列表
+                        }
                     return board
             
             # 获取所有楼层的棋盘状态
-            for floor in range(1, 6):  # 假设有5个楼层
+            for floor in range(FLOOR_NUM):  # 使用正确的FLOOR_NUM常量
                 tiles = []
                 tile_count = 0
+                special_count = 0
                 
                 # 获取该楼层的所有有效区块
-                for x in range(20):  # 假设棋盘大小为20x20
-                    for y in range(20):
+                for y in range(MAP_SIZE * REGION_SIZE):  # 使用正确的MAP_SIZE和REGION_SIZE常量
+                    for x in range(MAP_SIZE * REGION_SIZE):
                         try:
+                            # 获取普通格子状态
                             status = self.game.tile_system.get_tile_status(x, y, floor)
                             if status:
-                                tiles.append({
+                                # 检查是否为特殊格子
+                                special_type = self.game.tile_system.get_special_tile(x, y, floor)
+                                
+                                tile_info = {
                                     'x': x,
                                     'y': y,
-                                    'status': status
-                                })
+                                    'status': 1  # 1表示可通行
+                                }
+                                
+                                # 如果是特殊格子，添加特殊类型信息
+                                if special_type:
+                                    tile_info['special'] = special_type
+                                    special_count += 1
+                                
+                                tiles.append(tile_info)
                                 tile_count += 1
                         except Exception as e:
                             print(f"获取瓦片状态时出错 - x={x}, y={y}, floor={floor}: {str(e)}")
                 
-                print(f"楼层 {floor} 包含 {tile_count} 个有效瓦片")
-                board['floors'][floor] = tiles
+                # 获取已放置区域信息
+                placed_regions = []
+                for region_x, region_y in self.game.tile_system.placed_regions[floor]:
+                    placed_regions.append({
+                        'x': region_x,
+                        'y': region_y
+                    })
                 
-            total_tiles = sum(len(tiles) for tiles in board['floors'].values())
-            print(f"获取棋盘状态完成 - 总共 {len(board['floors'])} 个楼层, {total_tiles} 个瓦片")
+                print(f"楼层 {floor} 包含 {tile_count} 个有效瓦片，{special_count} 个特殊瓦片，{len(placed_regions)} 个已放置区域")
+                
+                # 将完整的楼层信息添加到结果中
+                board['floors'][floor] = {
+                    'tiles': tiles,
+                    'placed_regions': placed_regions
+                }
+                
+            # 添加游戏中的其他相关信息到棋盘状态
+            board['current_floor'] = self.game.current_floor
+            board['total_floors'] = FLOOR_NUM
+            
+            print(f"获取棋盘状态完成 - 总共 {len(board['floors'])} 个楼层")
             
         except Exception as e:
+            import traceback
             print(f"获取棋盘状态时发生异常: {str(e)}")
+            traceback.print_exc()
+            
             # 返回一个最小的有效棋盘
-            for floor in range(1, 6):
-                board['floors'][floor] = [
-                    {'x': 10, 'y': 10, 'status': 1}, 
-                    {'x': 11, 'y': 10, 'status': 1},
-                    {'x': 10, 'y': 11, 'status': 1}
-                ]
+            from core.constants import FLOOR_NUM  # 确保导入常量
+            
+            # 每个楼层至少有三个相邻的瓦片和一个放置区域
+            for floor in range(FLOOR_NUM):
+                board['floors'][floor] = {
+                    'tiles': [
+                        {'x': 10, 'y': 10, 'status': 1}, 
+                        {'x': 11, 'y': 10, 'status': 1},
+                        {'x': 10, 'y': 11, 'status': 1}
+                    ],
+                    'placed_regions': [{'x': 2, 'y': 2}]
+                }
+            
+            # 确保返回当前楼层和总楼层数信息
+            board['current_floor'] = self.game.current_floor if hasattr(self.game, 'current_floor') else 1
+            board['total_floors'] = FLOOR_NUM
+            
+            print(f"已创建紧急备用的最小有效棋盘")
         
         return board
     
@@ -255,7 +302,6 @@ class GameAdapter:
         
         if event_type == 'roll_dice':
             # 处理掷骰子事件
-            print(f"收到掷骰子请求，当前游戏状态: selecting_start={self.game.selecting_start}, dice_value={self.game.dice_value}")
             
             # 获取强制开始参数（前端处理选择初始位置完成但后端未更新的情况）
             force_start = False
@@ -289,13 +335,11 @@ class GameAdapter:
                                 if not position_taken:
                                     player.set_position(x, y)
                                     placed = True
-                                    print(f"强制为玩家 {player.name} 设置随机初始位置 ({x},{y})")
                             attempts += 1
                 
                 self.game.selecting_start = False
                 self.game.move_phase = 'roll_dice'
                 result['message'] = '已强制结束初始位置选择阶段，游戏正式开始！'
-                print("强制结束初始位置选择阶段，游戏开始")
             
             # 确保current_player是Player对象而不是dict
             current_player = self.game.players[self.game.current_player_index]

@@ -108,9 +108,6 @@ class Game:
         self.special_used = False  # Whether player has used special action
         self.move_history = []  # For undo functionality
         
-        # Debug flags
-        self.debug_mode = False
-        
         print(f"Game initialized with {num_players} players, starting at floor {self.current_floor}")
         print("Please select starting positions for all players")
     
@@ -145,6 +142,104 @@ class Game:
         
         return final_value
     
+    def initialize_board(self):
+        """初始化棋盘系统
+        
+        如果tile_system不存在或为空，重新创建一个新的PathTileSystem实例
+        """
+        print("初始化棋盘系统...")
+        
+        # 如果tile_system不存在，创建一个新的
+        if not hasattr(self, 'tile_system') or self.tile_system is None:
+            self.tile_system = PathTileSystem()
+            print("创建了新的PathTileSystem实例")
+        else:
+            print("使用现有的PathTileSystem实例")
+        
+        # 确保中央区域已初始化
+        center_x, center_y = MAP_SIZE // 2, MAP_SIZE // 2
+        if (center_x, center_y) not in self.tile_system.placed_regions[1]:
+            print("中央区域未初始化，重新初始化中央区域")
+            self.tile_system.initialize_center_region()
+        else:
+            print("中央区域已初始化")
+            
+        # 添加一些随机特殊格子（如楼梯和电梯）以丰富游戏性
+        self._add_random_special_tiles()
+        
+        print("棋盘系统初始化完成")
+        
+    def _add_random_special_tiles(self):
+        """添加随机特殊格子（楼梯和电梯）"""
+        # 确保每层之间有足够的连接
+        for floor in range(FLOOR_NUM - 1):
+            # 为当前楼层和上层添加楼梯
+            self._ensure_floor_connection(floor, floor + 1, 'stairs', 2)
+            
+            # 每隔2层添加一个电梯
+            if floor % 2 == 0 and floor + 2 < FLOOR_NUM:
+                self._ensure_floor_connection(floor, floor + 2, 'elevator', 1)
+                
+    def _ensure_floor_connection(self, floor1, floor2, tile_type, count):
+        """确保两个楼层之间有指定类型和数量的连接
+        
+        Args:
+            floor1: 第一个楼层
+            floor2: 第二个楼层
+            tile_type: 连接类型 ('stairs'/'elevator')
+            count: 需要的连接数量
+        """
+        # 获取已有的这种连接数量
+        existing_count = 0
+        for pos in self.tile_system.special_pos[floor1]:
+            if self.tile_system.special_tiles[floor1][pos] == tile_type:
+                existing_count += 1
+                
+        # 如果已有足够的连接，不需要添加
+        if existing_count >= count:
+            return
+            
+        # 需要添加的连接数量
+        to_add = count - existing_count
+        
+        # 在第一个楼层的已放置区域中寻找合适位置添加特殊格子
+        candidates = []
+        for region_x, region_y in self.tile_system.placed_regions[floor1]:
+            # 计算区域左上角坐标
+            start_x = region_x * REGION_SIZE
+            start_y = region_y * REGION_SIZE
+            
+            # 检查该区域内的所有格子
+            for y in range(REGION_SIZE):
+                for x in range(REGION_SIZE):
+                    pos_x, pos_y = start_x + x, start_y + y
+                    # 检查该位置是否为白色可通行格子，且没有特殊格子
+                    if (self.tile_system.get_tile_status(pos_x, pos_y, floor1) and 
+                            (pos_x, pos_y) not in self.tile_system.special_tiles[floor1]):
+                        candidates.append((pos_x, pos_y))
+        
+        # 如果找不到合适位置，尝试在第二个楼层添加
+        if not candidates and floor2 < FLOOR_NUM:
+            for region_x, region_y in self.tile_system.placed_regions[floor2]:
+                start_x = region_x * REGION_SIZE
+                start_y = region_y * REGION_SIZE
+                for y in range(REGION_SIZE):
+                    for x in range(REGION_SIZE):
+                        pos_x, pos_y = start_x + x, start_y + y
+                        if (self.tile_system.get_tile_status(pos_x, pos_y, floor2) and 
+                                (pos_x, pos_y) not in self.tile_system.special_tiles[floor2]):
+                            candidates.append((pos_x, pos_y))
+                            
+        # 随机选择位置添加特殊格子
+        if candidates:
+            random.shuffle(candidates)
+            for i in range(min(to_add, len(candidates))):
+                pos = candidates[i]
+                self.tile_system.add_special_tile(pos, floor1, tile_type)
+                # 在对应的楼层也添加同样的特殊格子
+                self.tile_system.add_special_tile(pos, floor2, tile_type)
+                print(f"在楼层{floor1}和{floor2}之间的位置{pos}添加了{tile_type}")
+                
     def get_valid_moves(self, start_pos, steps, use=1):
         """Get valid move tiles
         

@@ -142,7 +142,33 @@ def format_game_state(game_state):
                 if player['dice_value'] != state['dice_value']:
                     print(f"警告: 当前玩家{player['id']+1}的骰子值({player['dice_value']})与游戏状态中的值({state['dice_value']})不一致，同步为游戏状态值")
                     player['dice_value'] = state['dice_value']
-                    
+    
+    # 处理棋盘数据，确保格式兼容性
+    if 'board' in state and 'floors' in state['board']:
+        for floor_num, floor_data in state['board']['floors'].items():
+            # 检查是否是新格式（字典形式）
+            if isinstance(floor_data, dict) and 'tiles' in floor_data:
+                # 新格式，已经是字典形式，确保tiles和placed_regions都是列表
+                if not isinstance(floor_data['tiles'], list):
+                    floor_data['tiles'] = list(floor_data['tiles'])
+                
+                if 'placed_regions' in floor_data and not isinstance(floor_data['placed_regions'], list):
+                    floor_data['placed_regions'] = list(floor_data['placed_regions'])
+                
+                # 确保每个位置都是列表而不是元组
+                for tile in floor_data['tiles']:
+                    if 'x' in tile and 'y' in tile:
+                        # 位置已经是x/y格式，不需要转换
+                        pass
+            else:
+                # 旧格式，直接是瓦片列表，转换为新格式
+                print(f"转换楼层 {floor_num} 的数据从旧格式到新格式")
+                tiles = floor_data
+                state['board']['floors'][floor_num] = {
+                    'tiles': tiles,
+                    'placed_regions': []  # 旧格式没有区域信息，提供空列表
+                }
+    
     # 打印最终格式化的状态摘要
     player_summary = []
     if 'players' in state:
@@ -216,9 +242,18 @@ def handle_join_game(data):
     if 'board' in game_state and 'floors' in game_state['board']:
         print(f"游戏状态中的棋盘数据: {len(game_state['board']['floors'])}个楼层")
         for floor_num, tiles in game_state['board']['floors'].items():
-            print(f"  楼层{floor_num}: {len(tiles)}个瓦片")
-            if len(tiles) > 0:
-                print(f"  样本瓦片: {tiles[0]}")
+            # 检查tiles是否为字典（新格式）或列表（旧格式）
+            if isinstance(tiles, dict) and 'tiles' in tiles:
+                tile_list = tiles['tiles']
+                regions_list = tiles.get('placed_regions', [])
+                print(f"  楼层{floor_num}: {len(tile_list)}个瓦片, {len(regions_list)}个放置区域")
+                if len(tile_list) > 0:
+                    print(f"  样本瓦片: {tile_list[0]}")
+            else:
+                # 旧格式：tiles直接是瓦片列表
+                print(f"  楼层{floor_num}: {len(tiles)}个瓦片")
+                if len(tiles) > 0:
+                    print(f"  样本瓦片: {tiles[0]}")
     
     print(f"广播游戏状态到房间: {game_id}")
     emit('game_state', game_state)
