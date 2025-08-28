@@ -4,18 +4,18 @@
 - [x] **backend_setup**: Set up Flask backend server with Flask-SocketIO for real-time communication
 - [x] **project_structure**: Create complete directory structure for both server/ and client/ directories  
 - [x] **backend_config**: Implement config.py and requirements.txt with all necessary Python dependencies
-- [ ] **game_constants**: Create constants.py with all game constants (max players, initial stats, floor limits, etc.)
+- [x] **game_constants**: Create constants.py with all game constants (max players, initial stats, floor limits, etc.)
 
 ## Core Game Logic
-- [ ] **player_class**: Implement Player class with Disorder value, floor tracking, position, and item/effect slots
-- [ ] **board_system**: Create Board class to manage multi-floor 3D map, path tiles, zones, and special locations
-- [ ] **card_system**: Implement card classes (Path tiles, Effect cards, Item cards, Anomaly cards, Button cards, Zone Name cards)
+- [x] **player_class**: Implement Player class with Disorder value, floor tracking, position, and item/effect slots
+- [x] **board_system**: Create Board class to manage multi-floor 3D map, path tiles, zones, and special locations
+- [x] **card_system**: Implement card classes (Path tiles, Effect cards, Item cards, Anomaly cards, Button cards, Zone Name cards)
 - [ ] **core_game_engine**: Build Game class with turn management, game phases, victory conditions, and state validation
 - [ ] **game_actions**: Implement core game actions (Explore, Fall, Move, Meet, Rob, use stairs/elevators)
 
 ## Multiplayer Infrastructure
-- [ ] **game_manager**: Create GameManager to handle multiple concurrent game sessions and player routing
-- [ ] **websocket_routes**: Implement SocketIO event handlers (create_game, join_game, player_action, game_state_update)
+- [x] **game_manager**: Create GameManager to handle multiple concurrent game sessions and player routing
+- [x] **websocket_routes**: Implement SocketIO event handlers (create_game, join_game, player_action, game_state_update)
 
 ## Frontend (React + Vite)
 - [ ] **frontend_setup**: Set up React + Vite frontend with proper package.json and project structure
@@ -39,11 +39,12 @@
 
 ## Progress Tracking
 - **In Progress**: None
-- **Completed**: backend_setup, project_structure, backend_config
+- **Completed**: backend_setup, project_structure, backend_config, game_constants, player_class, board_system, card_system, game_manager, websocket_routes
 - **Blocked**: None
 
 ## Latest Updates
-- ✅ **Backend Setup Complete**: Flask server with SocketIO, config, and dependencies
-- ✅ **Directory Structure**: Complete server/ and client/ structure created
-- ✅ **Environment Configuration**: .env support added with proper variable loading
-- 🔄 **Ready for Testing**: Basic server can now be tested with the HTML test client
+- ✅ **Core Game Logic Complete**: All fundamental classes implemented (Player, Board, Cards)
+- ✅ **Full Backend Infrastructure**: Server, WebSockets, session management
+- ✅ **Comprehensive Card System**: All card types with effects and deck management
+- 🧪 **Ready for Testing**: Core logic test suite created - run `python server/test_game_logic.py`
+- 📋 **Next Phase**: Game engine and actions, then frontend development
