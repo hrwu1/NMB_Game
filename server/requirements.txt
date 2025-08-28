@@ -1,0 +1,21 @@
+# Flask and core web framework
+Flask==2.3.3
+Flask-SocketIO==5.3.6
+Flask-CORS==4.0.0
+
+# WebSocket support
+python-socketio==5.8.0
+python-engineio==4.7.1
+
+# Utilities
+python-dotenv==1.0.0
+
+# Development dependencies
+pytest==7.4.2
+pytest-flask==1.2.0
+black==23.7.0
+flake8==6.0.0
+
+# Optional: Redis for scaling (uncomment when needed)
+# redis==5.0.0
+# Flask-Session==0.5.0

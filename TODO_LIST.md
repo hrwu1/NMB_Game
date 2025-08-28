@@ -1,9 +1,9 @@
 # NMB Game Implementation TODO List
 
 ## Backend Foundation
-- [ ] **backend_setup**: Set up Flask backend server with Flask-SocketIO for real-time communication
-- [ ] **project_structure**: Create complete directory structure for both server/ and client/ directories  
-- [ ] **backend_config**: Implement config.py and requirements.txt with all necessary Python dependencies
+- [x] **backend_setup**: Set up Flask backend server with Flask-SocketIO for real-time communication
+- [x] **project_structure**: Create complete directory structure for both server/ and client/ directories  
+- [x] **backend_config**: Implement config.py and requirements.txt with all necessary Python dependencies
 - [ ] **game_constants**: Create constants.py with all game constants (max players, initial stats, floor limits, etc.)
 
 ## Core Game Logic
@@ -39,5 +39,11 @@
 
 ## Progress Tracking
 - **In Progress**: None
-- **Completed**: None
+- **Completed**: backend_setup, project_structure, backend_config
 - **Blocked**: None
+
+## Latest Updates
+- ✅ **Backend Setup Complete**: Flask server with SocketIO, config, and dependencies
+- ✅ **Directory Structure**: Complete server/ and client/ structure created
+- ✅ **Environment Configuration**: .env support added with proper variable loading
+- 🔄 **Ready for Testing**: Basic server can now be tested with the HTML test client
