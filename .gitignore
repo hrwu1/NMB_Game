@@ -174,4 +174,4 @@ cython_debug/
 .pypirc
 
 # Our own ignore for privacy protection
-NMB_Game.zip
+
