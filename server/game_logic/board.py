@@ -16,33 +16,24 @@ from .constants import (
 )
 
 @dataclass
-class Position:
-    """Represents a position on the board"""
-    x: int
-    y: int
+class TilePosition:
+    """Represents a tile position on the board (for tile placement)"""
+    x: int  # Tile grid X (0-9)
+    y: int  # Tile grid Y (0-9) 
     floor: int
     
     def __post_init__(self):
-        """Validate position bounds"""
+        """Validate tile position bounds"""
         if not (0 <= self.x < BOARD_SIZE[0] and 0 <= self.y < BOARD_SIZE[1]):
-            raise ValueError(f"Position ({self.x}, {self.y}) out of bounds")
+            raise ValueError(f"Tile position ({self.x}, {self.y}) out of bounds")
         if self.floor not in range(*FLOOR_RANGE):
             raise ValueError(f"Floor {self.floor} out of range {FLOOR_RANGE}")
     
-    def __hash__(self):
-        return hash((self.x, self.y, self.floor))
-    
-    def __eq__(self, other):
-        if isinstance(other, Position):
-            return self.x == other.x and self.y == other.y and self.floor == other.floor
-        return False
-    
     def to_tuple(self) -> Tuple[int, int, int]:
-        """Convert to tuple for easy comparison"""
         return (self.x, self.y, self.floor)
     
-    def get_adjacent_positions(self, include_current_floor_only=False) -> List['Position']:
-        """Get all adjacent positions (including diagonals)"""
+    def get_adjacent_positions(self, include_current_floor_only=False) -> List['TilePosition']:
+        """Get adjacent tile positions for tile-level operations"""
         adjacent = []
         for dx in [-1, 0, 1]:
             for dy in [-1, 0, 1]:
@@ -55,11 +46,97 @@ class Position:
                 if 0 <= new_x < BOARD_SIZE[0] and 0 <= new_y < BOARD_SIZE[1]:
                     try:
                         if include_current_floor_only:
-                            adjacent.append(Position(new_x, new_y, self.floor))
+                            adjacent.append(TilePosition(new_x, new_y, self.floor))
                         else:
                             # Include all floors for full adjacency
                             for floor in range(*FLOOR_RANGE):
-                                adjacent.append(Position(new_x, new_y, floor))
+                                adjacent.append(TilePosition(new_x, new_y, floor))
+                    except ValueError:
+                        continue  # Skip invalid positions
+        
+        return adjacent
+
+@dataclass
+class Position:
+    """Represents a sub-position on the board (for player movement)"""
+    tile_x: int    # Which tile (0-3)
+    tile_y: int    # Which tile (0-3)
+    sub_x: int     # Position within tile (0-3)
+    sub_y: int     # Position within tile (0-3)
+    floor: int
+    
+    def __post_init__(self):
+        """Validate position bounds"""
+        if not (0 <= self.tile_x < BOARD_SIZE[0] and 0 <= self.tile_y < BOARD_SIZE[1]):
+            raise ValueError(f"Tile position ({self.tile_x}, {self.tile_y}) out of bounds")
+        if not (0 <= self.sub_x < 4 and 0 <= self.sub_y < 4):
+            raise ValueError(f"Sub-position ({self.sub_x}, {self.sub_y}) out of bounds (must be 0-3)")
+        if self.floor not in range(*FLOOR_RANGE):
+            raise ValueError(f"Floor {self.floor} out of range {FLOOR_RANGE}")
+    
+    def __hash__(self):
+        return hash((self.tile_x, self.tile_y, self.sub_x, self.sub_y, self.floor))
+    
+    def __eq__(self, other):
+        if isinstance(other, Position):
+            return (self.tile_x == other.tile_x and self.tile_y == other.tile_y and 
+                   self.sub_x == other.sub_x and self.sub_y == other.sub_y and 
+                   self.floor == other.floor)
+        return False
+    
+    def to_tuple(self) -> Tuple[int, int, int, int, int]:
+        """Convert to tuple for easy comparison"""
+        return (self.tile_x, self.tile_y, self.sub_x, self.sub_y, self.floor)
+    
+    def get_tile_position(self) -> TilePosition:
+        """Get the tile position this sub-position belongs to"""
+        return TilePosition(self.tile_x, self.tile_y, self.floor)
+    
+    def to_absolute_coords(self) -> Tuple[int, int]:
+        """Convert to absolute board coordinates for display"""
+        abs_x = self.tile_x * 4 + self.sub_x
+        abs_y = self.tile_y * 4 + self.sub_y
+        return (abs_x, abs_y)
+    
+    def get_adjacent_positions(self, include_current_floor_only=False) -> List['Position']:
+        """Get all adjacent sub-positions (within same tile and adjacent tiles)"""
+        adjacent = []
+        
+        # Adjacent positions within same tile and adjacent tiles
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                if dx == 0 and dy == 0:
+                    continue  # Skip current position
+                
+                new_sub_x = self.sub_x + dx
+                new_sub_y = self.sub_y + dy
+                new_tile_x = self.tile_x
+                new_tile_y = self.tile_y
+                
+                # Handle crossing tile boundaries
+                if new_sub_x < 0:
+                    new_tile_x -= 1
+                    new_sub_x = 3
+                elif new_sub_x > 3:
+                    new_tile_x += 1
+                    new_sub_x = 0
+                    
+                if new_sub_y < 0:
+                    new_tile_y -= 1
+                    new_sub_y = 3
+                elif new_sub_y > 3:
+                    new_tile_y += 1
+                    new_sub_y = 0
+                
+                # Check tile bounds
+                if 0 <= new_tile_x < BOARD_SIZE[0] and 0 <= new_tile_y < BOARD_SIZE[1]:
+                    try:
+                        if include_current_floor_only:
+                            adjacent.append(Position(new_tile_x, new_tile_y, new_sub_x, new_sub_y, self.floor))
+                        else:
+                            # Include all floors for full adjacency
+                            for floor in range(*FLOOR_RANGE):
+                                adjacent.append(Position(new_tile_x, new_tile_y, new_sub_x, new_sub_y, floor))
                     except ValueError:
                         continue  # Skip invalid positions
         
@@ -70,13 +147,14 @@ class PathTile:
     """Represents a path tile on the board"""
     tile_id: str
     tile_type: PathTileType
-    position: Position
+    position: TilePosition  # Tile grid position
     rotation: int = 0  # 0, 90, 180, 270 degrees
     special_squares: Dict[Tuple[int, int], SpecialSquareType] = field(default_factory=dict)
     zone: Optional[str] = None  # A-H
     is_corrupted: bool = False
     is_removed: bool = False  # For stairwells that are removed after use
     connections: List[Tuple[int, int]] = field(default_factory=list)  # Valid paths within tile
+    movable_positions: Set[Tuple[int, int]] = field(default_factory=set)  # Which sub-positions can be moved to
     
     def __post_init__(self):
         """Initialize tile with default layout"""
@@ -90,6 +168,10 @@ class PathTile:
         # Set up connections if not specified
         if not self.connections:
             self.connections = self._generate_default_connections()
+        
+        # Generate movable positions based on special squares
+        if not self.movable_positions:
+            self.movable_positions = self._generate_movable_positions()
     
     def _generate_default_layout(self) -> Dict[Tuple[int, int], SpecialSquareType]:
         """Generate default 4x4 tile layout"""
@@ -133,34 +215,73 @@ class PathTile:
         
         return connections
     
-    def can_enter_square(self, local_pos: Tuple[int, int], player_disorder: int = 0) -> bool:
-        """Check if a square can be entered"""
-        square_type = self.special_squares.get(local_pos, SpecialSquareType.NORMAL)
+    def _generate_movable_positions(self) -> Set[Tuple[int, int]]:
+        """Generate which sub-positions within this tile can be moved to"""
+        movable = set()
         
-        if square_type == SpecialSquareType.WALL:
-            # Can pass walls with high disorder
-            from .constants import can_pass_walls
-            return can_pass_walls(player_disorder)
+        for x in range(4):
+            for y in range(4):
+                square_type = self.special_squares.get((x, y), SpecialSquareType.NORMAL)
+                
+                # For now, randomly make some positions movable (later we can define this manually)
+                if square_type == SpecialSquareType.WALL:
+                    # Walls are never movable (except with high disorder)
+                    continue
+                elif square_type in [SpecialSquareType.NORMAL, SpecialSquareType.EVENT_SQUARE, 
+                                   SpecialSquareType.ITEM_SQUARE, SpecialSquareType.EMERGENCY_DOOR,
+                                   SpecialSquareType.STAIRWELL, SpecialSquareType.ELEVATOR_ROOM]:
+                    # These are always movable
+                    movable.add((x, y))
+                else:
+                    # For other types, randomly decide (70% chance movable)
+                    if random.random() < 0.7:
+                        movable.add((x, y))
+        
+        # Ensure at least some positions are movable
+        if not movable:
+            # If no positions are movable, make corners movable
+            movable.update([(0, 0), (0, 3), (3, 0), (3, 3)])
+        
+        return movable
+    
+    def can_enter_square(self, local_pos: Tuple[int, int], player_disorder: int = 0) -> bool:
+        """Check if a sub-position within this tile can be entered"""
+        # First check if it's a movable position
+        if local_pos not in self.movable_positions:
+            # Check if it's a wall that high disorder can pass through
+            square_type = self.special_squares.get(local_pos, SpecialSquareType.NORMAL)
+            if square_type == SpecialSquareType.WALL:
+                from .constants import can_pass_walls
+                return can_pass_walls(player_disorder)
+            return False
         
         return True
     
+    def is_position_movable(self, local_pos: Tuple[int, int]) -> bool:
+        """Check if a sub-position within this tile is movable"""
+        return local_pos in self.movable_positions
+    
     def get_entrance_points(self) -> List[Tuple[int, int]]:
         """Get valid entrance points to this tile"""
-        # For now, return edge squares that aren't walls
+        # Return all movable positions on the edges of the tile
         entrance_points = []
         
-        # Check edges
+        # Check edges - prioritize edge positions for entrances
         for x in range(4):
             for y in [0, 3]:  # Top and bottom edges
-                if self.can_enter_square((x, y)):
+                if (x, y) in self.movable_positions:
                     entrance_points.append((x, y))
         
-        for y in range(4):
+        for y in range(1, 3):  # Middle rows (avoid corners we already checked)
             for x in [0, 3]:  # Left and right edges
-                if self.can_enter_square((x, y)):
+                if (x, y) in self.movable_positions:
                     entrance_points.append((x, y))
         
-        return entrance_points if entrance_points else [(0, 0)]  # Fallback
+        # If no edge positions are movable, return any movable position
+        if not entrance_points and self.movable_positions:
+            entrance_points = list(self.movable_positions)[:4]  # Take first few
+        
+        return entrance_points if entrance_points else [(1, 1)]  # Fallback to center
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert tile to dictionary for serialization"""
@@ -178,7 +299,8 @@ class PathTile:
             "is_corrupted": self.is_corrupted,
             "is_removed": self.is_removed,
             "connections": self.connections,
-            "entrance_points": self.get_entrance_points()
+            "entrance_points": self.get_entrance_points(),
+            "movable_positions": [{"x": pos[0], "y": pos[1]} for pos in self.movable_positions]
         }
 
 class Board:
@@ -212,11 +334,11 @@ class Board:
     
     def _create_initial_tile(self) -> None:
         """Create the initial path tile on floor 2"""
-        initial_position = Position(INITIAL_POSITION[0], INITIAL_POSITION[1], STARTING_FLOOR)
+        initial_tile_pos = TilePosition(INITIAL_POSITION[0], INITIAL_POSITION[1], STARTING_FLOOR)
         initial_tile = PathTile(
             tile_id="initial_tile",
             tile_type=PathTileType.INITIAL,
-            position=initial_position,
+            position=initial_tile_pos,
             zone="B"  # Starting zone
         )
         
@@ -273,11 +395,39 @@ class Board:
         
         return None
     
-    def get_tile(self, position: Position) -> Optional[PathTile]:
-        """Get tile at specific position"""
-        floor = position.floor
-        pos_key = (position.x, position.y)
+    def get_tile_at_tile_pos(self, tile_position: TilePosition) -> Optional[PathTile]:
+        """Get tile at specific tile position"""
+        floor = tile_position.floor
+        pos_key = (tile_position.x, tile_position.y)
         return self.floors[floor].get(pos_key)
+    
+    def get_tile_at_position(self, position: Position) -> Optional[PathTile]:
+        """Get tile that contains the specified sub-position"""
+        tile_pos = TilePosition(position.tile_x, position.tile_y, position.floor)
+        return self.get_tile_at_tile_pos(tile_pos)
+    
+    def get_tile(self, position) -> Optional[PathTile]:
+        """Get tile at position (supports both TilePosition and Position)"""
+        if isinstance(position, TilePosition):
+            return self.get_tile_at_tile_pos(position)
+        elif isinstance(position, Position):
+            return self.get_tile_at_position(position)
+        else:
+            # Legacy support - assume it's a Position-like object with x, y, floor
+            floor = position.floor
+            pos_key = (position.x, position.y)
+            return self.floors[floor].get(pos_key)
+    
+    def is_position_movable(self, position: Position) -> bool:
+        """Check if a sub-position can be moved to"""
+        tile = self.get_tile_at_position(position)
+        if not tile:
+            return False
+        
+        if tile.is_corrupted or tile.is_removed:
+            return False
+        
+        return tile.is_position_movable((position.sub_x, position.sub_y))
     
     def _has_adjacent_tile(self, position: Position) -> bool:
         """Check if position has at least one adjacent tile"""

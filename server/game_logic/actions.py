@@ -10,7 +10,7 @@ from datetime import datetime
 
 from .constants import *
 from .player import Player
-from .board import Board, Position, PathTile
+from .board import Board, Position, TilePosition, PathTile
 from .cards import *
 
 def validate_action(game, socket_id: str, action_type: str) -> Tuple[bool, str]:
@@ -64,23 +64,43 @@ def action_move(game, socket_id: str, move_data: Dict[str, Any]) -> Dict[str, An
     
     # Validate target position
     try:
-        target_pos = Position(target_position["x"], target_position["y"], target_position["floor"])
-    except (ValueError, KeyError):
-        return {"success": False, "reason": "Invalid target position"}
+        if "sub_x" in target_position and "sub_y" in target_position:
+            # New position format with tile and sub-coordinates
+            target_pos = Position(
+                tile_x=target_position["tile_x"],
+                tile_y=target_position["tile_y"], 
+                sub_x=target_position["sub_x"],
+                sub_y=target_position["sub_y"],
+                floor=target_position["floor"]
+            )
+        else:
+            # Legacy format - convert absolute coordinates to tile+sub
+            abs_x = target_position["x"]
+            abs_y = target_position["y"]
+            tile_x = abs_x // 4
+            tile_y = abs_y // 4
+            sub_x = abs_x % 4
+            sub_y = abs_y % 4
+            target_pos = Position(tile_x, tile_y, sub_x, sub_y, target_position["floor"])
+    except (ValueError, KeyError) as e:
+        return {"success": False, "reason": f"Invalid target position: {str(e)}"}
     
-    # Current position
-    current_pos = Position(player.position[0], player.position[1], player.floor)
+    # Current position (already a Position object)
+    current_pos = player.position
     
-    # Calculate movement cost
-    if path:
-        movement_cost = len(path)
-    else:
-        # Find path automatically
-        board_path = game.board.find_path(current_pos, target_pos, player.disorder)
-        if not board_path:
-            return {"success": False, "reason": "No valid path to target"}
-        movement_cost = len(board_path) - 1  # Exclude starting position
-        path = [pos.to_tuple() for pos in board_path]
+    # Check if target position is movable
+    if not game.board.is_position_movable(target_pos):
+        return {"success": False, "reason": "Target position is not movable (blocked by walls or obstacles)"}
+    
+    # Calculate movement cost (simple distance for now)
+    abs_current = current_pos.to_absolute_coords()
+    abs_target = target_pos.to_absolute_coords()
+    movement_cost = abs(abs_target[0] - abs_current[0]) + abs(abs_target[1] - abs_current[1])
+    
+    # For now, use simple movement cost calculation
+    # Later we can implement proper pathfinding with the new position system
+    if movement_cost == 0:
+        return {"success": False, "reason": "Already at target position"}
     
     # Check movement points
     if movement_cost > player.get_remaining_movement():
@@ -88,7 +108,7 @@ def action_move(game, socket_id: str, move_data: Dict[str, Any]) -> Dict[str, An
     
     # Perform movement
     player.use_movement_points(movement_cost)
-    player.update_position((target_pos.x, target_pos.y))
+    player.update_position(target_pos)
     player.floor = target_pos.floor
     
     # Trigger any tile effects at destination
@@ -124,9 +144,22 @@ def action_explore(game, socket_id: str, explore_data: Dict[str, Any]) -> Dict[s
         return {"success": False, "reason": "Tile placement position required"}
     
     try:
-        place_pos = Position(placement_position["x"], placement_position["y"], placement_position["floor"])
-    except (ValueError, KeyError):
-        return {"success": False, "reason": "Invalid placement position"}
+        # For tile placement, we use tile coordinates (not sub-positions)
+        if "tile_x" in placement_position:
+            place_pos = TilePosition(
+                x=placement_position["tile_x"],
+                y=placement_position["tile_y"],
+                floor=placement_position["floor"]
+            )
+        else:
+            # Legacy format - convert absolute to tile coordinates
+            abs_x = placement_position["x"]
+            abs_y = placement_position["y"]
+            tile_x = abs_x // 4
+            tile_y = abs_y // 4
+            place_pos = TilePosition(tile_x, tile_y, placement_position["floor"])
+    except (ValueError, KeyError) as e:
+        return {"success": False, "reason": f"Invalid placement position: {str(e)}"}
     
     # Draw path tile from deck
     path_card = game.decks[CardType.PATH_TILE].draw()

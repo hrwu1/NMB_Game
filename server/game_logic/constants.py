@@ -19,12 +19,12 @@ RECOMMENDED_PLAYERS = (2, 4)
 FLOOR_COUNT = 5
 FLOOR_RANGE = (1, 6)  # Floors 1-5 (Python range excludes upper bound)
 STARTING_FLOOR = 2
-BOARD_SIZE = (10, 10)  # Grid dimensions per floor
+BOARD_SIZE = (4, 4)  # 4x4 tile grid per floor
 
 # Initial player stats
 INITIAL_DISORDER = 0
 INITIAL_FLOOR = 2
-INITIAL_POSITION = (0, 0)  # Starting position on initial tile
+INITIAL_POSITION = (2, 2)  # Starting tile position (center of 4x4 grid)
 MAX_DISORDER = 10
 DISORDER_FALL_THRESHOLD = 6
 

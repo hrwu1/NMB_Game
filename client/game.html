@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NMB Game - Playable Prototype</title>
+    <script src="https://cdn.socket.io/4.7.1/socket.io.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            color: #ffffff;
+            min-height: 100vh;
+            overflow-x: auto;
+        }
+        
+        .game-container {
+            display: flex;
+            height: 100vh;
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        .left-panel {
+            flex: 0 0 300px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .center-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .right-panel {
+            flex: 0 0 350px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .panel {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .panel h3 {
+            color: #4fd1c7;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+            border-bottom: 1px solid rgba(79, 209, 199, 0.3);
+            padding-bottom: 5px;
+        }
+        
+        /* Connection Status */
+        .connection-status {
+            padding: 10px;
+            text-align: center;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        
+        .connected {
+            background: rgba(76, 175, 80, 0.3);
+            border: 1px solid #4CAF50;
+        }
+        
+        .disconnected {
+            background: rgba(244, 67, 54, 0.3);
+            border: 1px solid #f44336;
+        }
+        
+        /* Game Controls */
+        .game-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .input-group label {
+            font-size: 0.9em;
+            color: #cccccc;
+        }
+        
+        input, button {
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        input {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #4fd1c7;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #4fd1c7, #29b6f6);
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 209, 199, 0.3);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        /* Player Status */
+        .player-status {
+            border: 2px solid #4fd1c7;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .player-header {
+            background: linear-gradient(45deg, #4fd1c7, #29b6f6);
+            padding: 10px;
+            font-weight: bold;
+        }
+        
+        .player-stats {
+            padding: 10px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            font-size: 0.9em;
+        }
+        
+        .stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+        }
+        
+        .disorder-high {
+            background: rgba(244, 67, 54, 0.3) !important;
+            border: 1px solid #f44336;
+        }
+        
+        /* Game Board */
+        .game-board {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            min-height: 400px;
+            padding: 20px;
+            position: relative;
+            overflow: auto;
+        }
+        
+        .board-message {
+            text-align: center;
+            color: #888;
+            margin-top: 150px;
+            font-size: 1.2em;
+        }
+        
+        .board-grid {
+            display: grid;
+            grid-template-columns: repeat(16, 20px);
+            grid-template-rows: repeat(16, 20px);
+            gap: 1px;
+            margin: 20px auto;
+            justify-content: center;
+        }
+        
+        .board-tile {
+            width: 20px;
+            height: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .tile-boundary {
+            border: 2px solid rgba(255, 255, 255, 0.4) !important;
+        }
+        
+        .board-tile:hover {
+            border-color: #4fd1c7;
+            transform: scale(1.1);
+        }
+        
+        .tile-basic {
+            background: linear-gradient(45deg, #2196F3, #21CBF3);
+        }
+        
+        .tile-disordered {
+            background: linear-gradient(45deg, #f44336, #ff6b6b);
+        }
+        
+        .tile-stairwell {
+            background: linear-gradient(45deg, #9C27B0, #E91E63);
+        }
+        
+        .tile-elevator {
+            background: linear-gradient(45deg, #FF9800, #FFC107);
+        }
+        
+        .tile-initial {
+            background: linear-gradient(45deg, #4CAF50, #8BC34A);
+            border: 2px solid #fff;
+        }
+        
+        .tile-corrupted {
+            background: #000 !important;
+            border-color: #8B0000 !important;
+        }
+        
+        .tile-wall {
+            background: #444 !important;
+            border-color: #666 !important;
+            cursor: not-allowed;
+        }
+        
+        .player-pawn {
+            position: absolute;
+            top: 1px;
+            left: 1px;
+            right: 1px;
+            bottom: 1px;
+            border-radius: 50%;
+            border: 1px solid #fff;
+            font-size: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #000;
+            z-index: 10;
+        }
+        
+        .player-1 { background: #ff6b6b; }
+        .player-2 { background: #4ecdc4; }
+        .player-3 { background: #45b7d1; }
+        .player-4 { background: #f9ca24; }
+        
+        /* Action Buttons */
+        .action-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        
+        .action-btn {
+            padding: 10px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border: none;
+            border-radius: 5px;
+            color: white;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.3s ease;
+        }
+        
+        .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
+        }
+        
+        .action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .action-btn.primary {
+            background: linear-gradient(45deg, #4fd1c7, #29b6f6);
+        }
+        
+        .action-btn.danger {
+            background: linear-gradient(45deg, #f44336, #ff6b6b);
+        }
+        
+        /* Player Hand */
+        .player-hand {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            padding: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .card:hover {
+            border-color: #4fd1c7;
+            background: rgba(79, 209, 199, 0.1);
+        }
+        
+        .card-name {
+            font-weight: bold;
+            color: #4fd1c7;
+            margin-bottom: 3px;
+        }
+        
+        .card-description {
+            color: #ccc;
+            font-size: 11px;
+        }
+        
+        .card-item {
+            border-left: 3px solid #4CAF50;
+        }
+        
+        .card-event {
+            border-left: 3px solid #FF9800;
+        }
+        
+        .card-anomaly {
+            border-left: 3px solid #f44336;
+        }
+        
+        /* Game Log */
+        .game-log {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 5px;
+            padding: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 5px;
+            border-radius: 3px;
+            border-left: 3px solid #4fd1c7;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        
+        .log-timestamp {
+            color: #888;
+            font-size: 10px;
+        }
+        
+        .log-message {
+            color: #fff;
+            margin-top: 2px;
+        }
+        
+        .log-action {
+            border-left-color: #4CAF50;
+        }
+        
+        .log-error {
+            border-left-color: #f44336;
+        }
+        
+        .log-system {
+            border-left-color: #FF9800;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <!-- Left Panel: Game Controls & Player Status -->
+        <div class="left-panel">
+            <!-- Connection Status -->
+            <div class="panel">
+                <h3>Connection</h3>
+                <div id="connection-status" class="connection-status disconnected">
+                    Disconnected
+                </div>
+            </div>
+            
+            <!-- Game Controls -->
+            <div class="panel">
+                <h3>Game Controls</h3>
+                <div class="game-controls" id="game-controls">
+                    <div class="input-group">
+                        <label for="playerName">Player Name</label>
+                        <input type="text" id="playerName" placeholder="Enter your name" value="Player1">
+                    </div>
+                    
+                    <button onclick="createGame()" id="createGameBtn">Create New Game</button>
+                    
+                    <div class="input-group">
+                        <label for="gameId">Game ID</label>
+                        <input type="text" id="gameId" placeholder="Enter game ID to join">
+                    </div>
+                    
+                    <button onclick="joinGame()" id="joinGameBtn">Join Game</button>
+                    
+                    <button onclick="startGame()" id="startGameBtn" style="display: none;">Start Game</button>
+                </div>
+            </div>
+            
+            <!-- Player Status -->
+            <div class="panel player-status" id="player-status" style="display: none;">
+                <div class="player-header">
+                    <span id="player-name">Player Name</span>
+                    <span id="turn-indicator" style="float: right;">⏳</span>
+                </div>
+                <div class="player-stats">
+                    <div class="stat">
+                        <span>Disorder:</span>
+                        <span id="disorder-value">0</span>
+                    </div>
+                    <div class="stat">
+                        <span>Floor:</span>
+                        <span id="floor-value">2</span>
+                    </div>
+                    <div class="stat">
+                        <span>Position:</span>
+                        <span id="position-value">(0,0)</span>
+                    </div>
+                    <div class="stat">
+                        <span>Movement:</span>
+                        <span id="movement-value">0/0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Center Panel: Game Board -->
+        <div class="center-panel">
+            <div class="panel" style="flex: 1;">
+                <h3>Game Board - <span id="current-floor">Floor 2</span></h3>
+                <div class="board-controls" style="margin-bottom: 10px;">
+                    <button onclick="changeFloor(-1)" id="floorDownBtn">⬇️ Floor Down</button>
+                    <button onclick="changeFloor(1)" id="floorUpBtn">⬆️ Floor Up</button>
+                    <span style="margin-left: 20px; color: #4fd1c7;">Phase: <span id="game-phase">Waiting</span></span>
+                    <span style="margin-left: 20px;">Round: <span id="game-round">0</span></span>
+                </div>
+                <div id="game-board" class="game-board">
+                    <div class="board-message">
+                        Create or join a game to see the board
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Right Panel: Actions & Game Info -->
+        <div class="right-panel">
+            <!-- Action Buttons -->
+            <div class="panel">
+                <h3>Actions</h3>
+                <div id="action-buttons" class="action-buttons">
+                    <p style="color: #888; text-align: center;">Join a game to see actions</p>
+                </div>
+            </div>
+            
+            <!-- Player Hand -->
+            <div class="panel">
+                <h3>Your Hand (<span id="hand-count">0</span>/7)</h3>
+                <div id="player-hand" class="player-hand">
+                    <p style="color: #888; text-align: center;">No cards</p>
+                </div>
+            </div>
+            
+            <!-- Game Log -->
+            <div class="panel" style="flex: 1;">
+                <h3>Game Log</h3>
+                <div id="game-log" class="game-log">
+                    <p style="color: #888;">Waiting for game events...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Game state variables
+        let socket = null;
+        let gameState = null;
+        let currentGameId = null;
+        let currentPlayerId = null;
+        let selectedFloor = 2;
+        
+        // Initialize the game
+        function initGame() {
+            connectToServer();
+        }
+        
+        // Socket connection management
+        function connectToServer() {
+            socket = io('http://localhost:5000');
+            
+            socket.on('connect', function() {
+                updateConnectionStatus(true);
+                addLog('Connected to NMB Game server', 'system');
+            });
+            
+            socket.on('disconnect', function() {
+                updateConnectionStatus(false);
+                addLog('Disconnected from server', 'error');
+            });
+            
+            // Game event handlers
+            socket.on('connected', function(data) {
+                addLog(data.message, 'system');
+            });
+            
+            socket.on('game_created', function(data) {
+                addLog(`Game created: ${data.game_id}`, 'action');
+                currentGameId = data.game_id;
+                document.getElementById('gameId').value = data.game_id;
+                document.getElementById('startGameBtn').style.display = 'block';
+                updateGameControls('host');
+            });
+            
+            socket.on('game_joined', function(data) {
+                addLog(`Joined game: ${data.game_id}`, 'action');
+                currentGameId = data.game_id;
+                updateGameControls('player');
+            });
+            
+            socket.on('player_joined', function(data) {
+                addLog(`${data.player_name} joined the game`, 'system');
+            });
+            
+            socket.on('game_started', function(data) {
+                addLog('Game started!', 'action');
+                gameState = data.game_state;
+                document.getElementById('startGameBtn').style.display = 'none';
+                updateGameDisplay();
+                updateActionButtons();
+            });
+            
+            socket.on('game_state_update', function(data) {
+                gameState = data.game_state;
+                if (data.action_result) {
+                    addLog(`Action: ${JSON.stringify(data.action_result)}`, 'action');
+                }
+                updateGameDisplay();
+                updateActionButtons();
+            });
+            
+            socket.on('action_result', function(data) {
+                if (data.success) {
+                    addLog(`Action successful: ${data.message || 'Action completed'}`, 'action');
+                } else {
+                    addLog(`Action failed: ${data.reason}`, 'error');
+                }
+            });
+            
+            socket.on('error', function(data) {
+                addLog(`Error: ${data.message}`, 'error');
+            });
+        }
+        
+        // UI Update functions
+        function updateConnectionStatus(connected) {
+            const statusElement = document.getElementById('connection-status');
+            if (connected) {
+                statusElement.textContent = 'Connected ✅';
+                statusElement.className = 'connection-status connected';
+            } else {
+                statusElement.textContent = 'Disconnected ❌';
+                statusElement.className = 'connection-status disconnected';
+            }
+        }
+        
+        function updateGameControls(role) {
+            const createBtn = document.getElementById('createGameBtn');
+            const joinBtn = document.getElementById('joinGameBtn');
+            const startBtn = document.getElementById('startGameBtn');
+            
+            createBtn.disabled = true;
+            joinBtn.disabled = true;
+            
+            if (role === 'host') {
+                startBtn.style.display = 'block';
+            }
+        }
+        
+        function updateGameDisplay() {
+            if (!gameState) return;
+            
+            // Update game info
+            document.getElementById('game-phase').textContent = gameState.phase;
+            document.getElementById('game-round').textContent = gameState.round;
+            
+            // Find current player
+            const currentPlayer = getCurrentPlayer();
+            if (currentPlayer) {
+                updatePlayerStatus(currentPlayer);
+                updatePlayerHand(currentPlayer);
+            }
+            
+            // Update board
+            updateGameBoard();
+        }
+        
+        function getCurrentPlayer() {
+            if (!gameState || !gameState.players) return null;
+            
+            // Try to find player by socket ID or use first player
+            for (const [socketId, player] of Object.entries(gameState.players)) {
+                if (socketId === socket.id || !currentPlayerId) {
+                    currentPlayerId = socketId;
+                    return player;
+                }
+                if (socketId === currentPlayerId) {
+                    return player;
+                }
+            }
+            return null;
+        }
+        
+        function updatePlayerStatus(player) {
+            document.getElementById('player-status').style.display = 'block';
+            document.getElementById('player-name').textContent = player.name;
+            document.getElementById('disorder-value').textContent = player.disorder;
+            document.getElementById('floor-value').textContent = player.floor;
+            
+            // Display both tile and sub-position
+            const pos = player.position;
+            if (pos.tile_x !== undefined) {
+                document.getElementById('position-value').textContent = `T(${pos.tile_x},${pos.tile_y}) S(${pos.sub_x},${pos.sub_y})`;
+            } else {
+                // Legacy format
+                document.getElementById('position-value').textContent = `(${player.position[0]}, ${player.position[1]})`;
+            }
+            
+            const movementUsed = player.movement_used || 0;
+            const movementPoints = player.movement_points || 0;
+            document.getElementById('movement-value').textContent = `${movementUsed}/${movementPoints}`;
+            
+            // Update disorder styling
+            const disorderStat = document.querySelector('#disorder-value').parentElement;
+            if (player.disorder >= 6) {
+                disorderStat.classList.add('disorder-high');
+            } else {
+                disorderStat.classList.remove('disorder-high');
+            }
+            
+            // Update turn indicator
+            const isCurrentTurn = gameState.current_player === currentPlayerId;
+            const turnIndicator = document.getElementById('turn-indicator');
+            turnIndicator.textContent = isCurrentTurn ? '🎯 Your Turn' : '⏳ Waiting';
+        }
+        
+        function updateGameBoard() {
+            const boardElement = document.getElementById('game-board');
+            const currentFloorData = gameState?.board?.floors?.[selectedFloor];
+            
+            if (!currentFloorData) {
+                boardElement.innerHTML = '<div class="board-message">No tiles on this floor</div>';
+                return;
+            }
+            
+            // Create board grid - 16x16 sub-positions (4x4 tiles with 4x4 sub-positions each)
+            const gridDiv = document.createElement('div');
+            gridDiv.className = 'board-grid';
+            
+            // Create 16x16 sub-position grid
+            for (let abs_y = 0; abs_y < 16; abs_y++) {
+                for (let abs_x = 0; abs_x < 16; abs_x++) {
+                    const subDiv = document.createElement('div');
+                    subDiv.className = 'board-tile';
+                    
+                    // Calculate which tile this sub-position belongs to
+                    const tile_x = Math.floor(abs_x / 4);
+                    const tile_y = Math.floor(abs_y / 4);
+                    const sub_x = abs_x % 4;
+                    const sub_y = abs_y % 4;
+                    
+                    subDiv.dataset.tileX = tile_x;
+                    subDiv.dataset.tileY = tile_y;
+                    subDiv.dataset.subX = sub_x;
+                    subDiv.dataset.subY = sub_y;
+                    subDiv.dataset.absX = abs_x;
+                    subDiv.dataset.absY = abs_y;
+                    
+                    // Add tile boundary styling for edges
+                    if (sub_x === 0 || sub_x === 3 || sub_y === 0 || sub_y === 3) {
+                        subDiv.classList.add('tile-boundary');
+                    }
+                    
+                    // Check if there's a tile at this position
+                    const tileKey = `${tile_x},${tile_y}`;
+                    const tileData = currentFloorData[tileKey];
+                    
+                    if (tileData) {
+                        // Check if this sub-position is movable
+                        const isMovable = tileData.movable_positions?.some(pos => 
+                            pos.x === sub_x && pos.y === sub_y);
+                        
+                        if (isMovable) {
+                            // Add tile styling based on type
+                            subDiv.classList.add(`tile-${tileData.tile_type}`);
+                        } else {
+                            // Non-movable position (wall/blocked)
+                            subDiv.classList.add('tile-wall');
+                        }
+                        
+                        if (tileData.is_corrupted) {
+                            subDiv.classList.add('tile-corrupted');
+                        }
+                        
+                        // Add players on this sub-position
+                        const playersOnSubPos = getPlayersOnSubPosition(tile_x, tile_y, sub_x, sub_y, selectedFloor);
+                        playersOnSubPos.forEach((player, index) => {
+                            const pawnDiv = document.createElement('div');
+                            pawnDiv.className = `player-pawn player-${index + 1}`;
+                            pawnDiv.textContent = player.name.charAt(0);
+                            pawnDiv.title = player.name;
+                            subDiv.appendChild(pawnDiv);
+                        });
+                        
+                        // Add click handler for movement
+                        if (isMovable) {
+                            subDiv.addEventListener('click', () => handleSubPositionClick(tile_x, tile_y, sub_x, sub_y));
+                        }
+                    }
+                    
+                    gridDiv.appendChild(subDiv);
+                }
+            }
+            
+            boardElement.innerHTML = '';
+            boardElement.appendChild(gridDiv);
+        }
+        
+        function getPlayersOnSubPosition(tile_x, tile_y, sub_x, sub_y, floor) {
+            if (!gameState?.players) return [];
+            
+            return Object.values(gameState.players).filter(player => {
+                const pos = player.position;
+                return pos.tile_x === tile_x && 
+                       pos.tile_y === tile_y &&
+                       pos.sub_x === sub_x &&
+                       pos.sub_y === sub_y &&
+                       player.floor === floor;
+            });
+        }
+        
+        function updateActionButtons() {
+            const actionsDiv = document.getElementById('action-buttons');
+            
+            if (!gameState || gameState.state !== 'playing') {
+                actionsDiv.innerHTML = '<p style="color: #888; text-align: center;">Game not started</p>';
+                return;
+            }
+            
+            const isMyTurn = gameState.current_player === currentPlayerId;
+            const currentPlayer = getCurrentPlayer();
+            
+            if (!isMyTurn) {
+                actionsDiv.innerHTML = '<p style="color: #888; text-align: center;">Wait for your turn</p>';
+                return;
+            }
+            
+            // Generate action buttons based on current game state
+            const actions = [];
+            
+            if (currentPlayer.movement_points > currentPlayer.movement_used) {
+                actions.push({ 
+                    name: 'Move', 
+                    action: 'move', 
+                    class: 'primary',
+                    disabled: false 
+                });
+                
+                if (currentPlayer.disorder < 6) {
+                    actions.push({ 
+                        name: 'Explore', 
+                        action: 'explore', 
+                        class: 'primary',
+                        disabled: false 
+                    });
+                } else {
+                    actions.push({ 
+                        name: 'Fall', 
+                        action: 'fall', 
+                        class: 'danger',
+                        disabled: false 
+                    });
+                }
+            }
+            
+            actions.push({ 
+                name: 'Pass', 
+                action: 'pass', 
+                class: '',
+                disabled: false 
+            });
+            
+            actions.push({ 
+                name: 'End Turn', 
+                action: 'end_turn', 
+                class: 'danger',
+                disabled: false 
+            });
+            
+            // Render action buttons
+            actionsDiv.innerHTML = actions.map(action => `
+                <button class="action-btn ${action.class}" 
+                        onclick="performAction('${action.action}')" 
+                        ${action.disabled ? 'disabled' : ''}>
+                    ${action.name}
+                </button>
+            `).join('');
+        }
+        
+        function updatePlayerHand(player) {
+            const handDiv = document.getElementById('player-hand');
+            const handCount = document.getElementById('hand-count');
+            
+            const cards = player.inventory?.hand || [];
+            handCount.textContent = cards.length;
+            
+            if (cards.length === 0) {
+                handDiv.innerHTML = '<p style="color: #888; text-align: center;">No cards</p>';
+                return;
+            }
+            
+            handDiv.innerHTML = cards.map(card => `
+                <div class="card card-${card.effect_type || 'item'}" onclick="useCard('${card.card_id}')">
+                    <div class="card-name">${card.name}</div>
+                    <div class="card-description">${card.description || 'No description'}</div>
+                </div>
+            `).join('');
+        }
+        
+        // Game action functions
+        function createGame() {
+            const playerName = document.getElementById('playerName').value.trim();
+            if (!playerName) {
+                addLog('Please enter a player name', 'error');
+                return;
+            }
+            
+            socket.emit('create_game', { player_name: playerName });
+            addLog('Creating game...', 'system');
+        }
+        
+        function joinGame() {
+            const playerName = document.getElementById('playerName').value.trim();
+            const gameId = document.getElementById('gameId').value.trim();
+            
+            if (!playerName || !gameId) {
+                addLog('Please enter both player name and game ID', 'error');
+                return;
+            }
+            
+            socket.emit('join_game', { game_id: gameId, player_name: playerName });
+            addLog('Joining game...', 'system');
+        }
+        
+        function startGame() {
+            if (!currentGameId) {
+                addLog('No active game to start', 'error');
+                return;
+            }
+            
+            socket.emit('start_game', { game_id: currentGameId });
+            addLog('Starting game...', 'system');
+        }
+        
+        function performAction(actionType) {
+            if (!currentGameId || !gameState) {
+                addLog('No active game', 'error');
+                return;
+            }
+            
+            const actionData = {};
+            
+            // Handle different action types
+            if (actionType === 'move') {
+                // For now, just use current position + 1 as target (simplified)
+                const currentPlayer = getCurrentPlayer();
+                const pos = currentPlayer.position;
+                
+                if (pos.tile_x !== undefined) {
+                    // New position format - move within tile or to adjacent tile
+                    let newTileX = pos.tile_x;
+                    let newSubX = pos.sub_x + 1;
+                    
+                    // Handle movement across tile boundary
+                    if (newSubX > 3) {
+                        newTileX = Math.min(pos.tile_x + 1, 3);
+                        newSubX = 0;
+                    }
+                    
+                    actionData.target_position = { 
+                        tile_x: newTileX,
+                        tile_y: pos.tile_y,
+                        sub_x: newSubX,
+                        sub_y: pos.sub_y,
+                        floor: pos.floor || currentPlayer.floor
+                    };
+                } else {
+                    // Legacy format fallback
+                    const newX = Math.min(pos[0] + 1, 3);  // Updated to 4x4 range
+                    actionData.target_position = { 
+                        x: newX, 
+                        y: pos[1], 
+                        floor: currentPlayer.floor 
+                    };
+                }
+            } else if (actionType === 'explore') {
+                const currentPlayer = getCurrentPlayer();
+                const pos = currentPlayer.position;
+                
+                if (pos.tile_x !== undefined) {
+                    // Place new tile adjacent to current tile  
+                    const newTileX = Math.min(pos.tile_x + 1, 3);  // Updated to 4x4 range
+                    actionData.placement_position = { 
+                        tile_x: newTileX, 
+                        tile_y: pos.tile_y, 
+                        floor: pos.floor || currentPlayer.floor
+                    };
+                } else {
+                    // Legacy format fallback
+                    const newX = Math.min(pos[0] + 1, 3);  // Updated to 4x4 range
+                    actionData.placement_position = { 
+                        x: newX, 
+                        y: pos[1], 
+                        floor: currentPlayer.floor 
+                    };
+                }
+            }
+            
+            socket.emit('player_action', {
+                action_type: actionType,
+                action_data: actionData
+            });
+            
+            addLog(`Performing action: ${actionType}`, 'action');
+        }
+        
+        function handleSubPositionClick(tile_x, tile_y, sub_x, sub_y) {
+            if (!gameState || gameState.current_player !== currentPlayerId) {
+                return;
+            }
+            
+            const currentPlayer = getCurrentPlayer();
+            
+            // Check if this is a move action
+            if (currentPlayer.movement_points > currentPlayer.movement_used) {
+                const actionData = {
+                    target_position: { 
+                        tile_x: tile_x, 
+                        tile_y: tile_y,
+                        sub_x: sub_x,
+                        sub_y: sub_y,
+                        floor: selectedFloor 
+                    }
+                };
+                
+                socket.emit('player_action', {
+                    action_type: 'move',
+                    action_data: actionData
+                });
+                
+                addLog(`Moving to tile (${tile_x},${tile_y}) sub-position (${sub_x},${sub_y})`, 'action');
+            }
+        }
+        
+        function useCard(cardId) {
+            if (!currentGameId || !gameState) {
+                addLog('No active game', 'error');
+                return;
+            }
+            
+            socket.emit('player_action', {
+                action_type: 'use_item',
+                action_data: { item_id: cardId }
+            });
+            
+            addLog(`Using card: ${cardId}`, 'action');
+        }
+        
+        function changeFloor(direction) {
+            const newFloor = selectedFloor + direction;
+            if (newFloor >= 1 && newFloor <= 5) {
+                selectedFloor = newFloor;
+                document.getElementById('current-floor').textContent = `Floor ${selectedFloor}`;
+                updateGameBoard();
+            }
+        }
+        
+        // Utility functions
+        function addLog(message, type = 'system') {
+            const logDiv = document.getElementById('game-log');
+            const timestamp = new Date().toLocaleTimeString();
+            
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry log-${type}`;
+            
+            logEntry.innerHTML = `
+                <div class="log-timestamp">${timestamp}</div>
+                <div class="log-message">${message}</div>
+            `;
+            
+            // Remove old entries if too many
+            while (logDiv.children.length > 50) {
+                logDiv.removeChild(logDiv.firstChild);
+            }
+            
+            logDiv.appendChild(logEntry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        // Initialize the game when page loads
+        window.addEventListener('load', function() {
+            initGame();
+            addLog('Welcome to NMB Game!', 'system');
+            addLog('Create a new game or join an existing one to start playing.', 'system');
+        });
+    </script>
+</body>
+</html>

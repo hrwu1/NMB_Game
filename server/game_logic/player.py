@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import uuid
 
+# Position import will be done at runtime to avoid circular imports
+
 from .constants import (
     INITIAL_DISORDER, INITIAL_FLOOR, INITIAL_POSITION, MAX_DISORDER,
     MAX_ITEM_SLOTS, MAX_EFFECT_SLOTS, HAND_SIZE_LIMIT,
@@ -88,10 +90,18 @@ class Player:
         self.player_id = player_id or str(uuid.uuid4())[:8]
         self.created_at = datetime.now()
         
-        # Game state
+        # Game state  
         self.disorder = INITIAL_DISORDER
         self.floor = INITIAL_FLOOR
-        self.position = INITIAL_POSITION  # (x, y) on current floor
+        # Position using new tile+sub-position system
+        from .board import Position  # Import at runtime to avoid circular imports
+        self.position = Position(
+            tile_x=INITIAL_POSITION[0],  # Tile 5,5 
+            tile_y=INITIAL_POSITION[1],
+            sub_x=1,  # Center of tile
+            sub_y=1,
+            floor=INITIAL_FLOOR
+        )
         self.current_tile_id: Optional[str] = None
         
         # Movement and actions
@@ -151,13 +161,32 @@ class Player:
         print(f"Player {self.name}: Floor {old_floor} → {self.floor} ({reason})")
         return True
     
-    def update_position(self, new_position: Tuple[int, int], tile_id: str = None) -> None:
+    def update_position(self, new_position, tile_id: str = None) -> None:
         """Update player's position on current floor"""
-        self.position = new_position
+        from .board import Position  # Import at runtime to avoid circular imports
+        
+        if isinstance(new_position, tuple):
+            # Legacy tuple format - convert to new Position system
+            if len(new_position) == 2:
+                # Assume it's (x, y) and player stays in same tile
+                self.position = Position(
+                    tile_x=self.position.tile_x,
+                    tile_y=self.position.tile_y,
+                    sub_x=new_position[0] % 4,
+                    sub_y=new_position[1] % 4,
+                    floor=self.position.floor
+                )
+            elif len(new_position) == 5:
+                # Full position tuple
+                self.position = Position(*new_position)
+        else:
+            # New Position object
+            self.position = new_position
+            
         if tile_id:
             self.current_tile_id = tile_id
         
-        print(f"Player {self.name}: Moved to position {self.position}")
+        print(f"Player {self.name}: Moved to tile ({self.position.tile_x},{self.position.tile_y}) sub-position ({self.position.sub_x},{self.position.sub_y})")
     
     def set_movement_points(self, points: int) -> None:
         """Set movement points for the current turn"""
@@ -361,7 +390,13 @@ class Player:
             "socket_id": self.socket_id,
             "disorder": self.disorder,
             "floor": self.floor,
-            "position": self.position,
+            "position": {
+                "tile_x": self.position.tile_x,
+                "tile_y": self.position.tile_y,
+                "sub_x": self.position.sub_x,
+                "sub_y": self.position.sub_y,
+                "absolute_coords": self.position.to_absolute_coords()
+            },
             "current_tile_id": self.current_tile_id,
             "movement_points": self.movement_points,
             "movement_used": self.movement_used,
