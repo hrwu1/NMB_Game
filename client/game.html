@@ -893,12 +893,16 @@
         }
         
         function performAction(actionType) {
+            console.log(`🔍 DEBUG: performAction called with actionType: ${actionType}`);
+            
             if (!currentGameId || !gameState) {
                 addLog('No active game', 'error');
+                console.log('❌ DEBUG: No active game or game state');
                 return;
             }
             
-            const actionData = {};
+            console.log('✅ DEBUG: Game state exists, proceeding...');
+            let actionData = {}; // Changed from const to let so we can reassign if needed
             
             // Handle different action types
             if (actionType === 'move') {
@@ -934,33 +938,20 @@
                     };
                 }
             } else if (actionType === 'explore') {
-                const currentPlayer = getCurrentPlayer();
-                const pos = currentPlayer.position;
-                
-                if (pos.tile_x !== undefined) {
-                    // Place new tile adjacent to current tile  
-                    const newTileX = Math.min(pos.tile_x + 1, 3);  // Updated to 4x4 range
-                    actionData.placement_position = { 
-                        tile_x: newTileX, 
-                        tile_y: pos.tile_y, 
-                        floor: pos.floor || currentPlayer.floor
-                    };
-                } else {
-                    // Legacy format fallback
-                    const newX = Math.min(pos[0] + 1, 3);  // Updated to 4x4 range
-                    actionData.placement_position = { 
-                        x: newX, 
-                        y: pos[1], 
-                        floor: currentPlayer.floor 
-                    };
-                }
+                // Let the backend determine the best placement position
+                // Frontend just sends the explore action without specifying position
+                // Backend will find the best adjacent position automatically
+                // actionData is already {} so no need to reassign
             }
+            
+            console.log(`🔍 DEBUG: About to emit action - type: ${actionType}, data:`, actionData);
             
             socket.emit('player_action', {
                 action_type: actionType,
                 action_data: actionData
             });
             
+            console.log('✅ DEBUG: Action emitted successfully');
             addLog(`Performing action: ${actionType}`, 'action');
         }
         

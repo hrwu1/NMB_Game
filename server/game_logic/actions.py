@@ -133,33 +133,66 @@ def action_move(game, socket_id: str, move_data: Dict[str, Any]) -> Dict[str, An
 
 def action_explore(game, socket_id: str, explore_data: Dict[str, Any]) -> Dict[str, Any]:
     """Handle explore action - draw and place new path tile"""
+    print(f"🔍 DEBUG: Explore action called! socket_id: {socket_id}, data: {explore_data}")
+    
     is_valid, reason = validate_action(game, socket_id, ActionType.EXPLORE.value)
     if not is_valid:
+        print(f"❌ DEBUG: Explore action validation failed: {reason}")
         return {"success": False, "reason": reason}
+    
+    print("✅ DEBUG: Explore action validation passed!")
     
     player = game.players[socket_id]
     placement_position = explore_data.get("placement_position")
+    print(f"🔍 DEBUG: Player: {player.name}, placement_position: {placement_position}")
     
+    # If no placement position specified, find the best adjacent position automatically
     if not placement_position:
-        return {"success": False, "reason": "Tile placement position required"}
-    
-    try:
-        # For tile placement, we use tile coordinates (not sub-positions)
-        if "tile_x" in placement_position:
-            place_pos = TilePosition(
-                x=placement_position["tile_x"],
-                y=placement_position["tile_y"],
-                floor=placement_position["floor"]
-            )
-        else:
-            # Legacy format - convert absolute to tile coordinates
-            abs_x = placement_position["x"]
-            abs_y = placement_position["y"]
-            tile_x = abs_x // 4
-            tile_y = abs_y // 4
-            place_pos = TilePosition(tile_x, tile_y, placement_position["floor"])
-    except (ValueError, KeyError) as e:
-        return {"success": False, "reason": f"Invalid placement position: {str(e)}"}
+        # Get player's current tile position
+        current_tile_pos = TilePosition(
+            x=player.position.tile_x,
+            y=player.position.tile_y, 
+            floor=player.position.floor
+        )
+        
+        # Try adjacent positions in order: East, West, South, North
+        adjacent_offsets = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+        place_pos = None
+        
+        for dx, dy in adjacent_offsets:
+            test_x = current_tile_pos.x + dx
+            test_y = current_tile_pos.y + dy
+            
+            # Check bounds
+            if 0 <= test_x < BOARD_SIZE[0] and 0 <= test_y < BOARD_SIZE[1]:
+                test_pos = TilePosition(test_x, test_y, current_tile_pos.floor)
+                
+                # Check if position is not occupied
+                if not game.board.get_tile_at_tile_pos(test_pos):
+                    place_pos = test_pos
+                    break
+        
+        if not place_pos:
+            return {"success": False, "reason": "No adjacent positions available for tile placement"}
+    else:
+        # Handle legacy frontend that still sends placement_position
+        try:
+            # For tile placement, we use tile coordinates (not sub-positions)
+            if "tile_x" in placement_position:
+                place_pos = TilePosition(
+                    x=placement_position["tile_x"],
+                    y=placement_position["tile_y"],
+                    floor=placement_position["floor"]
+                )
+            else:
+                # Legacy format - convert absolute to tile coordinates
+                abs_x = placement_position["x"]
+                abs_y = placement_position["y"]
+                tile_x = abs_x // 4
+                tile_y = abs_y // 4
+                place_pos = TilePosition(tile_x, tile_y, placement_position["floor"])
+        except (ValueError, KeyError) as e:
+            return {"success": False, "reason": f"Invalid placement position: {str(e)}"}
     
     # Draw path tile from deck
     path_card = game.decks[CardType.PATH_TILE].draw()
@@ -195,11 +228,22 @@ def action_explore(game, socket_id: str, explore_data: Dict[str, Any]) -> Dict[s
     # Use remaining movement to continue onto new tile
     remaining_movement = player.get_remaining_movement()
     if remaining_movement > 0:
-        # Move to new tile
-        player.use_movement_points(1)
-        player.update_position((place_pos.x, place_pos.y))
-        player.floor = place_pos.floor
-        player.current_tile_id = new_tile.tile_id
+        # Move to new tile - find a valid entrance point
+        entrance_points = new_tile.get_entrance_points()
+        if entrance_points:
+            entrance_pos = entrance_points[0]  # Use first available entrance
+            # Create proper Position with tile + sub coordinates
+            new_position = Position(
+                tile_x=place_pos.x,
+                tile_y=place_pos.y,
+                sub_x=entrance_pos[0],
+                sub_y=entrance_pos[1],
+                floor=place_pos.floor
+            )
+            player.use_movement_points(1)
+            player.update_position(new_position)
+            player.floor = place_pos.floor
+            player.current_tile_id = new_tile.tile_id
     
     # Update statistics
     player.stats['tiles_explored'] += 1

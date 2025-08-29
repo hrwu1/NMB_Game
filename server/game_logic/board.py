@@ -429,13 +429,22 @@ class Board:
         
         return tile.is_position_movable((position.sub_x, position.sub_y))
     
-    def _has_adjacent_tile(self, position: Position) -> bool:
+    def _has_adjacent_tile(self, position) -> bool:
         """Check if position has at least one adjacent tile"""
-        adjacent_positions = position.get_adjacent_positions(include_current_floor_only=True)
-        
-        for adj_pos in adjacent_positions:
-            if self.get_tile(adj_pos) is not None:
-                return True
+        if isinstance(position, TilePosition):
+            # For tile placement, check adjacent tile positions
+            adjacent_tile_positions = position.get_adjacent_positions(include_current_floor_only=True)
+            
+            for adj_tile_pos in adjacent_tile_positions:
+                if self.get_tile_at_tile_pos(adj_tile_pos) is not None:
+                    return True
+        else:
+            # For sub-position checks, check adjacent sub-positions
+            adjacent_positions = position.get_adjacent_positions(include_current_floor_only=True)
+            
+            for adj_pos in adjacent_positions:
+                if self.get_tile(adj_pos) is not None:
+                    return True
         
         return False
     
@@ -457,9 +466,13 @@ class Board:
     # ZONE MANAGEMENT
     # =============================================================================
     
-    def _assign_zone(self, position: Position) -> str:
+    def _assign_zone(self, position) -> str:
         """Assign a zone to a tile position"""
-        pos_key = (position.x, position.y)
+        if isinstance(position, TilePosition):
+            pos_key = (position.x, position.y)
+        else:
+            # Handle legacy Position objects
+            pos_key = (position.tile_x, position.tile_y)
         
         # Check if already assigned
         if pos_key in self.zone_assignments:
@@ -470,7 +483,11 @@ class Board:
         adjacent_zones = set()
         
         for adj_pos in adjacent_positions:
-            adj_key = (adj_pos.x, adj_pos.y)
+            if isinstance(adj_pos, TilePosition):
+                adj_key = (adj_pos.x, adj_pos.y)
+            else:
+                adj_key = (adj_pos.tile_x, adj_pos.tile_y)
+            
             if adj_key in self.zone_assignments:
                 adjacent_zones.add(self.zone_assignments[adj_key])
         
