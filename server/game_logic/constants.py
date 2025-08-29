@@ -17,7 +17,7 @@ RECOMMENDED_PLAYERS = (2, 4)
 
 # Board dimensions
 FLOOR_COUNT = 5
-FLOOR_RANGE = (1, 5)
+FLOOR_RANGE = (1, 6)  # Floors 1-5 (Python range excludes upper bound)
 STARTING_FLOOR = 2
 BOARD_SIZE = (10, 10)  # Grid dimensions per floor
 

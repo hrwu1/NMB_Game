@@ -58,7 +58,7 @@ class Position:
                             adjacent.append(Position(new_x, new_y, self.floor))
                         else:
                             # Include all floors for full adjacency
-                            for floor in range(FLOOR_RANGE[0], FLOOR_RANGE[1] + 1):
+                            for floor in range(*FLOOR_RANGE):
                                 adjacent.append(Position(new_x, new_y, floor))
                     except ValueError:
                         continue  # Skip invalid positions
@@ -189,7 +189,7 @@ class Board:
         self.floors: Dict[int, Dict[Tuple[int, int], PathTile]] = {}
         
         # Initialize empty floors
-        for floor in range(FLOOR_RANGE[0], FLOOR_RANGE[1] + 1):
+        for floor in range(*FLOOR_RANGE):
             self.floors[floor] = {}
         
         # Zone management

@@ -20,11 +20,32 @@ def register_socket_handlers(socketio):
         print(f"Client connected: {request.sid}")
         emit('connected', {'message': 'Connected to NMB Game server'})
     
+    @socketio.on('get_valid_actions')
+    def handle_get_valid_actions(data):
+        """Handle request for valid actions"""
+        try:
+            valid_actions = game_manager.get_valid_actions(request.sid)
+            emit('valid_actions', {'actions': valid_actions})
+            
+        except Exception as e:
+            print(f"Error getting valid actions: {e}")
+            emit('error', {'message': f'Failed to get valid actions: {str(e)}'})
+    
     @socketio.on('disconnect')
     def handle_disconnect():
         """Handle client disconnection"""
         print(f"Client disconnected: {request.sid}")
-        # TODO: Handle player leaving game
+        
+        # Remove player from their game
+        game_id = game_manager.leave_game(request.sid)
+        if game_id:
+            # Notify other players in the game
+            socketio.emit('player_disconnected', {
+                'message': 'A player has disconnected',
+                'game_id': game_id
+            }, room=game_id)
+            
+            print(f"Player {request.sid} removed from game {game_id}")
         
     @socketio.on('create_game')
     def handle_create_game(data):
@@ -90,25 +111,66 @@ def register_socket_handlers(socketio):
             print(f"Error joining game: {e}")
             emit('error', {'message': f'Failed to join game: {str(e)}'})
     
+    @socketio.on('start_game')
+    def handle_start_game(data):
+        """Handle game start request"""
+        try:
+            game_id = data.get('game_id')
+            
+            print(f"Start game request for game {game_id} from {request.sid}")
+            
+            # Start the game
+            result = game_manager.start_game(game_id, request.sid)
+            
+            if result["success"]:
+                # Notify all players in the game that it started
+                game_state = game_manager.get_game_state(game_id)
+                socketio.emit('game_started', {
+                    'game_id': game_id,
+                    'message': 'Game started!',
+                    'game_state': game_state
+                }, room=game_id)
+                
+                print(f"Game {game_id} started successfully")
+            else:
+                emit('error', {'message': result.get("reason", "Failed to start game")})
+                
+        except Exception as e:
+            print(f"Error starting game: {e}")
+            emit('error', {'message': f'Failed to start game: {str(e)}'})
+    
     @socketio.on('player_action')
     def handle_player_action(data):
         """Handle player game actions"""
         try:
-            game_id = data.get('game_id')
+            action_type = data.get('action_type')
             action_data = data.get('action_data', {})
             
-            print(f"Player action received for game {game_id}: {action_data}")
+            print(f"Player action received: {action_type} from {request.sid}")
             
-            # Process the action (placeholder for now)
-            # TODO: Implement game logic processing
+            # Process the action through GameManager
+            result = game_manager.handle_player_action(request.sid, action_type, action_data)
             
-            # For now, just echo the action back to all players
-            socketio.emit('game_state_update', {
-                'game_id': game_id,
-                'action': action_data,
-                'message': 'Action processed (placeholder)'
-            }, room=game_id)
-            
+            if result["success"]:
+                # Get updated game state
+                game_id = game_manager.get_player_game(request.sid)
+                if game_id:
+                    game_state = game_manager.get_game_state(game_id)
+                    
+                    # Broadcast updated game state to all players
+                    socketio.emit('game_state_update', {
+                        'game_id': game_id,
+                        'action_result': result,
+                        'game_state': game_state
+                    }, room=game_id)
+                    
+                    print(f"Action {action_type} processed successfully for {request.sid}")
+                
+                # Send success response to acting player
+                emit('action_result', result)
+            else:
+                emit('error', {'message': result.get("reason", "Action failed")})
+                
         except Exception as e:
             print(f"Error processing player action: {e}")
             emit('error', {'message': f'Failed to process action: {str(e)}'})
