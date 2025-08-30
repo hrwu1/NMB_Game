@@ -1,0 +1,837 @@
+// Game state variables
+let socket = null;
+let gameState = null;
+let currentGameId = null;
+// Note: We track current player through socket.id directly, not this variable
+// let currentPlayerId = null; // Removed - using socket.id directly instead
+let selectedFloor = 2;
+
+// Initialize the game
+function initGame() {
+    connectToServer();
+}
+
+// Socket connection management
+function connectToServer() {
+    socket = io('http://localhost:5000');
+    
+    socket.on('connect', function() {
+        updateConnectionStatus(true);
+        addLog('Connected to NMB Game server', 'system');
+    });
+    
+    socket.on('disconnect', function() {
+        updateConnectionStatus(false);
+        addLog('Disconnected from server', 'error');
+    });
+    
+    // Game event handlers
+    socket.on('connected', function(data) {
+        addLog(data.message, 'system');
+    });
+    
+    socket.on('game_created', function(data) {
+        addLog(`Game created: ${data.game_id}`, 'action');
+        currentGameId = data.game_id;
+        document.getElementById('gameId').value = data.game_id;
+        document.getElementById('startGameBtn').style.display = 'block';
+        updateGameControls('host');
+    });
+    
+    socket.on('game_joined', function(data) {
+        addLog(`Joined game: ${data.game_id}`, 'action');
+        currentGameId = data.game_id;
+        updateGameControls('player');
+    });
+    
+    socket.on('player_joined', function(data) {
+        addLog(`${data.player_name} joined the game`, 'system');
+    });
+    
+    socket.on('game_started', function(data) {
+        addLog('Game started!', 'action');
+        gameState = data.game_state;
+        document.getElementById('startGameBtn').style.display = 'none';
+        updateGameDisplay();
+        updateActionButtons();
+    });
+    
+    socket.on('game_state_update', function(data) {
+        gameState = data.game_state;
+        if (data.action_result) {
+            addLog(`Action: ${JSON.stringify(data.action_result)}`, 'action');
+        }
+        updateGameDisplay();
+        updateActionButtons();
+    });
+    
+    socket.on('action_result', function(data) {
+        if (data.success) {
+            addLog(`Action successful: ${data.message || 'Action completed'}`, 'action');
+        } else {
+            addLog(`Action failed: ${data.reason}`, 'error');
+        }
+    });
+    
+    socket.on('error', function(data) {
+        const errorMessage = data.message || data.reason || 'Unknown server error';
+        addLog(`Server Error: ${errorMessage}`, 'error');
+        console.error('Socket error:', data);
+    });
+    
+    // Enhanced connection event handlers
+    socket.on('connect_error', function(error) {
+        console.error('Connection error:', error);
+        handleNetworkError(error);
+    });
+    
+    socket.on('disconnect', function(reason) {
+        console.log('Disconnected:', reason);
+        updateConnectionStatus(false);
+        addLog(`Disconnected: ${reason}`, 'warning');
+        
+        if (reason === 'io server disconnect') {
+            // Server disconnected us, don't try to reconnect automatically
+            addLog('Server disconnected the connection. Please refresh the page.', 'error');
+        } else {
+            // Client-side disconnect, try to reconnect
+            addLog('Attempting to reconnect...', 'system');
+        }
+    });
+    
+    socket.on('reconnect', function(attemptNumber) {
+        console.log('Reconnected after', attemptNumber, 'attempts');
+        updateConnectionStatus(true);
+        addLog(`Reconnected successfully!`, 'success');
+        
+        // Re-join game if we were in one
+        if (currentGameId) {
+            const playerName = document.getElementById('playerName').value.trim();
+            if (playerName) {
+                socket.emit('join_game', { game_id: currentGameId, player_name: playerName });
+                addLog('Rejoining game...', 'system');
+            }
+        }
+    });
+    
+    socket.on('reconnect_error', function(error) {
+        console.error('Reconnection failed:', error);
+        addLog('Failed to reconnect. Please refresh the page.', 'error');
+    });
+}
+
+// UI Update functions
+function updateConnectionStatus(connected) {
+    const statusElement = document.getElementById('connection-status');
+    if (connected) {
+        statusElement.textContent = 'Connected ✅';
+        statusElement.className = 'connection-status connected';
+    } else {
+        statusElement.textContent = 'Disconnected ❌';
+        statusElement.className = 'connection-status disconnected';
+    }
+}
+
+function updateGameControls(role) {
+    const createBtn = document.getElementById('createGameBtn');
+    const joinBtn = document.getElementById('joinGameBtn');
+    const startBtn = document.getElementById('startGameBtn');
+    
+    createBtn.disabled = true;
+    joinBtn.disabled = true;
+    
+    if (role === 'host') {
+        startBtn.style.display = 'block';
+    }
+}
+
+function updateGameDisplay() {
+    if (!gameState) return;
+    
+    // Update game info
+    document.getElementById('game-phase').textContent = gameState.phase;
+    document.getElementById('game-round').textContent = gameState.round;
+    
+    // Find current player
+    const currentPlayer = getCurrentPlayer();
+    if (currentPlayer) {
+        updatePlayerStatus(currentPlayer);
+        updatePlayerHand(currentPlayer);
+    }
+    
+    // Update board
+    updateGameBoard();
+}
+
+function getCurrentPlayer() {
+    if (!gameState || !gameState.players) return null;
+    
+    // Find the player that matches this client's socket ID
+    return gameState.players[socket.id] || null;
+}
+
+function updatePlayerStatus(player) {
+    document.getElementById('player-status').style.display = 'block';
+    document.getElementById('player-name').textContent = player.name;
+    document.getElementById('disorder-value').textContent = player.disorder;
+    document.getElementById('floor-value').textContent = player.floor;
+    
+    // Display both tile and sub-position
+    const pos = player.position;
+    if (pos.tile_x !== undefined) {
+        document.getElementById('position-value').textContent = `T(${pos.tile_x},${pos.tile_y}) S(${pos.sub_x},${pos.sub_y})`;
+    } else {
+        // Legacy format
+        document.getElementById('position-value').textContent = `(${player.position[0]}, ${player.position[1]})`;
+    }
+    
+    const movementUsed = player.movement_used || 0;
+    const movementPoints = player.movement_points || 0;
+    document.getElementById('movement-value').textContent = `${movementUsed}/${movementPoints}`;
+    
+    // Update disorder styling
+    const disorderStat = document.querySelector('#disorder-value').parentElement;
+    if (player.disorder >= 6) {
+        disorderStat.classList.add('disorder-high');
+    } else {
+        disorderStat.classList.remove('disorder-high');
+    }
+    
+    // Update turn indicator
+    const isCurrentTurn = gameState.current_player === socket.id;
+    const turnIndicator = document.getElementById('turn-indicator');
+    turnIndicator.textContent = isCurrentTurn ? '🎯 Your Turn' : '⏳ Waiting';
+}
+
+function updateGameBoard() {
+    const boardElement = document.getElementById('game-board');
+    const currentFloorData = gameState?.board?.floors?.[selectedFloor];
+    
+    if (!currentFloorData) {
+        boardElement.innerHTML = '<div class="board-message">No tiles on this floor</div>';
+        return;
+    }
+    
+    // Create board grid - 16x16 sub-positions (4x4 tiles with 4x4 sub-positions each)
+    const gridDiv = document.createElement('div');
+    gridDiv.className = 'board-grid';
+    
+    // Create 16x16 sub-position grid
+    for (let abs_y = 0; abs_y < 16; abs_y++) {
+        for (let abs_x = 0; abs_x < 16; abs_x++) {
+            const subDiv = document.createElement('div');
+            subDiv.className = 'board-tile';
+            
+            // Calculate which tile this sub-position belongs to
+            const tile_x = Math.floor(abs_x / 4);
+            const tile_y = Math.floor(abs_y / 4);
+            const sub_x = abs_x % 4;
+            const sub_y = abs_y % 4;
+            
+            subDiv.dataset.tileX = tile_x;
+            subDiv.dataset.tileY = tile_y;
+            subDiv.dataset.subX = sub_x;
+            subDiv.dataset.subY = sub_y;
+            subDiv.dataset.absX = abs_x;
+            subDiv.dataset.absY = abs_y;
+            
+            // Add tile boundary styling for edges
+            if (sub_x === 0 || sub_x === 3 || sub_y === 0 || sub_y === 3) {
+                subDiv.classList.add('tile-boundary');
+            }
+            
+            // Check if there's a tile at this position
+            const tileKey = `${tile_x},${tile_y}`;
+            const tileData = currentFloorData[tileKey];
+            
+            if (tileData) {
+                // Check if this sub-position is movable
+                const isMovable = tileData.movable_positions?.some(pos => 
+                    pos.x === sub_x && pos.y === sub_y);
+                
+                if (isMovable) {
+                    // Add tile styling based on type
+                    subDiv.classList.add(`tile-${tileData.tile_type}`);
+                } else {
+                    // Non-movable position (wall/blocked)
+                    subDiv.classList.add('tile-wall');
+                }
+                
+                if (tileData.is_corrupted) {
+                    subDiv.classList.add('tile-corrupted');
+                }
+                
+                // Add players on this sub-position
+                const playersOnSubPos = getPlayersOnSubPosition(tile_x, tile_y, sub_x, sub_y, selectedFloor);
+                playersOnSubPos.forEach((player, index) => {
+                    const pawnDiv = document.createElement('div');
+                    pawnDiv.className = `player-pawn player-${index + 1}`;
+                    pawnDiv.textContent = player.name.charAt(0);
+                    pawnDiv.title = player.name;
+                    subDiv.appendChild(pawnDiv);
+                });
+                
+                // Add click handler for movement
+                if (isMovable) {
+                    subDiv.addEventListener('click', () => handleSubPositionClick(tile_x, tile_y, sub_x, sub_y));
+                }
+            }
+            
+            gridDiv.appendChild(subDiv);
+        }
+    }
+    
+    boardElement.innerHTML = '';
+    boardElement.appendChild(gridDiv);
+}
+
+function getPlayersOnSubPosition(tile_x, tile_y, sub_x, sub_y, floor) {
+    if (!gameState?.players) return [];
+    
+    return Object.values(gameState.players).filter(player => {
+        const pos = player.position;
+        return pos.tile_x === tile_x && 
+               pos.tile_y === tile_y &&
+               pos.sub_x === sub_x &&
+               pos.sub_y === sub_y &&
+               player.floor === floor;
+    });
+}
+
+function updateActionButtons() {
+    const actionsDiv = document.getElementById('action-buttons');
+    
+    if (!gameState || gameState.state !== 'playing') {
+        actionsDiv.innerHTML = '<p style="color: #888; text-align: center;">Game not started</p>';
+        return;
+    }
+    
+    const isMyTurn = gameState.current_player === socket.id;
+    const currentPlayer = getCurrentPlayer();
+    
+    if (!isMyTurn) {
+        actionsDiv.innerHTML = '<p style="color: #888; text-align: center;">Wait for your turn</p>';
+        return;
+    }
+    
+    // Generate action buttons based on current game state
+    const actions = [];
+    
+    if (currentPlayer.movement_points > currentPlayer.movement_used) {
+        actions.push({ 
+            name: 'Move', 
+            action: 'move', 
+            class: 'primary',
+            disabled: false 
+        });
+        
+        if (currentPlayer.disorder < 6) {
+            actions.push({ 
+                name: 'Explore', 
+                action: 'explore', 
+                class: 'primary',
+                disabled: false 
+            });
+        } else {
+            actions.push({ 
+                name: 'Fall', 
+                action: 'fall', 
+                class: 'danger',
+                disabled: false 
+            });
+        }
+    }
+    
+    actions.push({ 
+        name: 'Pass', 
+        action: 'pass', 
+        class: '',
+        disabled: false 
+    });
+    
+    actions.push({ 
+        name: 'End Turn', 
+        action: 'end_turn', 
+        class: 'danger',
+        disabled: false 
+    });
+    
+    // Render action buttons
+    actionsDiv.innerHTML = actions.map(action => `
+        <button class="action-btn ${action.class}" 
+                onclick="performAction('${action.action}')" 
+                ${action.disabled ? 'disabled' : ''}>
+            ${action.name}
+        </button>
+    `).join('');
+}
+
+function updatePlayerHand(player) {
+    const handDiv = document.getElementById('player-hand');
+    const handCount = document.getElementById('hand-count');
+    
+    const cards = player.inventory?.hand || [];
+    handCount.textContent = cards.length;
+    
+    if (cards.length === 0) {
+        handDiv.innerHTML = '<p style="color: #888; text-align: center;">No cards</p>';
+        return;
+    }
+    
+    handDiv.innerHTML = cards.map(card => `
+        <div class="card card-${card.effect_type || 'item'}" onclick="useCard('${card.card_id}')">
+            <div class="card-name">${card.name}</div>
+            <div class="card-description">${card.description || 'No description'}</div>
+        </div>
+    `).join('');
+}
+
+// Game action functions with enhanced validation
+function createGame() {
+    const playerName = document.getElementById('playerName').value.trim();
+    
+    // Validate player name
+    const validation = validatePlayerName(playerName);
+    if (!validation.valid) {
+        addLog(validation.message, 'error');
+        return;
+    }
+    
+    // Check connection
+    if (!socket || !socket.connected) {
+        addLog('Not connected to server. Please wait for connection.', 'error');
+        return;
+    }
+    
+    // Disable button to prevent multiple clicks
+    const createBtn = document.getElementById('createGameBtn');
+    createBtn.disabled = true;
+    createBtn.textContent = 'Creating...';
+    
+    socket.emit('create_game', { player_name: playerName });
+    addLog(`Creating game for player: ${playerName}`, 'system');
+    
+    // Re-enable button after timeout
+    setTimeout(() => {
+        createBtn.disabled = false;
+        createBtn.textContent = 'Create New Game';
+    }, 3000);
+}
+
+function joinGame() {
+    const playerName = document.getElementById('playerName').value.trim();
+    const gameId = document.getElementById('gameId').value.trim().toUpperCase();
+    
+    // Validate player name
+    const nameValidation = validatePlayerName(playerName);
+    if (!nameValidation.valid) {
+        addLog(nameValidation.message, 'error');
+        return;
+    }
+    
+    // Validate game ID
+    const gameIdValidation = validateGameId(gameId);
+    if (!gameIdValidation.valid) {
+        addLog(gameIdValidation.message, 'error');
+        return;
+    }
+    
+    // Check connection
+    if (!socket || !socket.connected) {
+        addLog('Not connected to server. Please wait for connection.', 'error');
+        return;
+    }
+    
+    // Disable button to prevent multiple clicks
+    const joinBtn = document.getElementById('joinGameBtn');
+    joinBtn.disabled = true;
+    joinBtn.textContent = 'Joining...';
+    
+    socket.emit('join_game', { game_id: gameId, player_name: playerName });
+    addLog(`Joining game ${gameId} as ${playerName}`, 'system');
+    
+    // Re-enable button after timeout
+    setTimeout(() => {
+        joinBtn.disabled = false;
+        joinBtn.textContent = 'Join Game';
+    }, 3000);
+}
+
+function startGame() {
+    if (!currentGameId) {
+        addLog('No active game to start', 'error');
+        return;
+    }
+    
+    socket.emit('start_game', { game_id: currentGameId });
+    addLog('Starting game...', 'system');
+}
+
+function performAction(actionType) {
+    console.log(`🔍 DEBUG: performAction called with actionType: ${actionType}`);
+    
+    // Check connection first
+    if (!socket || !socket.connected) {
+        addLog('Not connected to server. Please reconnect.', 'error');
+        return;
+    }
+    
+    if (!currentGameId || !gameState) {
+        addLog('No active game session', 'error');
+        console.log('❌ DEBUG: No active game or game state');
+        return;
+    }
+    
+    console.log('✅ DEBUG: Game state exists, proceeding...');
+    let actionData = {};
+    
+    // Handle different action types
+    if (actionType === 'move') {
+        // For now, just use current position + 1 as target (simplified)
+        const currentPlayer = getCurrentPlayer();
+        const pos = currentPlayer.position;
+        
+        if (pos.tile_x !== undefined) {
+            // New position format - move within tile or to adjacent tile
+            let newTileX = pos.tile_x;
+            let newSubX = pos.sub_x + 1;
+            
+            // Handle movement across tile boundary
+            if (newSubX > 3) {
+                newTileX = Math.min(pos.tile_x + 1, 3);
+                newSubX = 0;
+            }
+            
+            actionData.target_position = { 
+                tile_x: newTileX,
+                tile_y: pos.tile_y,
+                sub_x: newSubX,
+                sub_y: pos.sub_y,
+                floor: pos.floor || currentPlayer.floor
+            };
+        } else {
+            // Legacy format fallback
+            const newX = Math.min(pos[0] + 1, 3);  // Updated to 4x4 range
+            actionData.target_position = { 
+                x: newX, 
+                y: pos[1], 
+                floor: currentPlayer.floor 
+            };
+        }
+    } else if (actionType === 'explore') {
+        // Let the backend determine the best placement position
+        // Frontend just sends the explore action without specifying position
+        // Backend will find the best adjacent position automatically
+        // actionData is already {} so no need to reassign
+    }
+    
+    // Validate action before sending
+    const validation = validateAction(actionType, actionData);
+    if (!validation.valid) {
+        addLog(validation.message, 'warning');
+        return;
+    }
+    
+    console.log(`🔍 DEBUG: About to emit action - type: ${actionType}, data:`, actionData);
+    
+    // Disable action buttons temporarily to prevent spam
+    const actionButtons = document.querySelectorAll('.action-btn');
+    actionButtons.forEach(btn => {
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+    });
+    
+    socket.emit('player_action', {
+        action_type: actionType,
+        action_data: actionData
+    });
+    
+    console.log('✅ DEBUG: Action emitted successfully');
+    addLog(`Performing action: ${actionType}`, 'action');
+    
+    // Re-enable action buttons after a short delay
+    setTimeout(() => {
+        actionButtons.forEach(btn => {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+        });
+    }, 1000);
+}
+
+function handleSubPositionClick(tile_x, tile_y, sub_x, sub_y) {
+    if (!gameState || gameState.current_player !== socket.id) {
+        return;
+    }
+    
+    const currentPlayer = getCurrentPlayer();
+    
+    // Check if this is a move action
+    if (currentPlayer.movement_points > currentPlayer.movement_used) {
+        const actionData = {
+            target_position: { 
+                tile_x: tile_x, 
+                tile_y: tile_y,
+                sub_x: sub_x,
+                sub_y: sub_y,
+                floor: selectedFloor 
+            }
+        };
+        
+        socket.emit('player_action', {
+            action_type: 'move',
+            action_data: actionData
+        });
+        
+        addLog(`Moving to tile (${tile_x},${tile_y}) sub-position (${sub_x},${sub_y})`, 'action');
+    }
+}
+
+function useCard(cardId) {
+    if (!currentGameId || !gameState) {
+        addLog('No active game', 'error');
+        return;
+    }
+    
+    socket.emit('player_action', {
+        action_type: 'use_item',
+        action_data: { item_id: cardId }
+    });
+    
+    addLog(`Using card: ${cardId}`, 'action');
+}
+
+function changeFloor(direction) {
+    const newFloor = selectedFloor + direction;
+    if (newFloor >= 1 && newFloor <= 5) {
+        selectedFloor = newFloor;
+        document.getElementById('current-floor').textContent = `Floor ${selectedFloor}`;
+        updateGameBoard();
+    }
+}
+
+// Enhanced error handling and utility functions
+function addLog(message, type = 'system') {
+    const logDiv = document.getElementById('game-log');
+    const timestamp = new Date().toLocaleTimeString();
+    
+    // Truncate extremely long messages to prevent layout issues
+    let displayMessage = message;
+    if (message.length > 500) {
+        displayMessage = message.substring(0, 480) + '... (truncated)';
+    }
+    
+    // Add appropriate icons for different log types
+    const icons = {
+        'info': 'ℹ️',
+        'action': '⚡',
+        'error': '❌',
+        'system': '🔧',
+        'success': '✅',
+        'warning': '⚠️'
+    };
+    
+    const icon = icons[type] || 'ℹ️';
+    
+    const logEntry = document.createElement('div');
+    logEntry.className = `log-entry log-${type}`;
+    
+    // Escape HTML to prevent XSS and layout issues
+    const escapedMessage = displayMessage
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    
+    logEntry.innerHTML = `
+        <div class="log-timestamp">${icon} ${timestamp}</div>
+        <div class="log-message">${escapedMessage}</div>
+    `;
+    
+    // Add title attribute for full message if truncated
+    if (message.length > 500) {
+        logEntry.title = message;
+    }
+    
+    // Remove old entries if too many
+    while (logDiv.children.length > 100) {
+        logDiv.removeChild(logDiv.firstChild);
+    }
+    
+    logDiv.appendChild(logEntry);
+    logDiv.scrollTop = logDiv.scrollHeight;
+    
+    // Show toast notification for errors and important messages
+    if (type === 'error' || type === 'warning') {
+        showToast(message, type);
+    }
+}
+
+// Toast notification system
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    
+    // Truncate toast messages too
+    let displayMessage = message;
+    if (message.length > 200) {
+        displayMessage = message.substring(0, 180) + '...';
+    }
+    
+    toast.textContent = displayMessage;
+    
+    // Style the toast
+    Object.assign(toast.style, {
+        position: 'fixed',
+        top: '20px',
+        right: '20px',
+        padding: '12px 20px',
+        borderRadius: '8px',
+        color: 'white',
+        fontWeight: 'bold',
+        zIndex: '1000',
+        transform: 'translateX(100%)',
+        transition: 'transform 0.3s ease',
+        maxWidth: '300px',
+        minWidth: '200px',
+        wordWrap: 'break-word',
+        overflowWrap: 'break-word',
+        wordBreak: 'break-word',
+        boxSizing: 'border-box'
+    });
+    
+    // Set background based on type
+    const backgrounds = {
+        'error': 'linear-gradient(135deg, #ef4444, #dc2626)',
+        'warning': 'linear-gradient(135deg, #f59e0b, #d97706)',
+        'success': 'linear-gradient(135deg, #10b981, #059669)',
+        'info': 'linear-gradient(135deg, #3b82f6, #2563eb)'
+    };
+    
+    toast.style.background = backgrounds[type] || backgrounds.info;
+    toast.style.boxShadow = '0 8px 20px rgba(0, 0, 0, 0.3)';
+    
+    document.body.appendChild(toast);
+    
+    // Animate in
+    setTimeout(() => {
+        toast.style.transform = 'translateX(0)';
+    }, 100);
+    
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+        toast.style.transform = 'translateX(100%)';
+        setTimeout(() => {
+            if (toast.parentNode) {
+                document.body.removeChild(toast);
+            }
+        }, 300);
+    }, 5000);
+}
+
+// Enhanced input validation
+function validatePlayerName(name) {
+    if (!name || name.trim().length === 0) {
+        return { valid: false, message: 'Player name cannot be empty' };
+    }
+    if (name.trim().length < 2) {
+        return { valid: false, message: 'Player name must be at least 2 characters' };
+    }
+    if (name.trim().length > 20) {
+        return { valid: false, message: 'Player name must be 20 characters or less' };
+    }
+    if (!/^[a-zA-Z0-9\s_-]+$/.test(name.trim())) {
+        return { valid: false, message: 'Player name can only contain letters, numbers, spaces, hyphens, and underscores' };
+    }
+    return { valid: true, message: '' };
+}
+
+function validateGameId(gameId) {
+    if (!gameId || gameId.trim().length === 0) {
+        return { valid: false, message: 'Game ID cannot be empty' };
+    }
+    if (gameId.trim().length !== 6) {
+        return { valid: false, message: 'Game ID must be exactly 6 characters' };
+    }
+    if (!/^[A-Z0-9]+$/.test(gameId.trim())) {
+        return { valid: false, message: 'Game ID can only contain uppercase letters and numbers' };
+    }
+    return { valid: true, message: '' };
+}
+
+// Network error handling
+function handleNetworkError(error) {
+    console.error('Network error:', error);
+    addLog('Connection lost. Attempting to reconnect...', 'error');
+    showToast('Connection lost. Please check your internet connection.', 'error');
+    
+    // Update connection status
+    const status = document.getElementById('connection-status');
+    status.textContent = 'Reconnecting...';
+    status.className = 'connection-status disconnected';
+    
+    // Try to reconnect after a delay
+    setTimeout(() => {
+        if (socket && !socket.connected) {
+            socket.connect();
+        }
+    }, 2000);
+}
+
+// Action validation before sending to server
+function validateAction(actionType, actionData) {
+    if (!currentGameId || !gameState) {
+        return { valid: false, message: 'No active game session' };
+    }
+    
+    const currentPlayer = getCurrentPlayer();
+    if (!currentPlayer) {
+        return { valid: false, message: 'Player not found in game' };
+    }
+    
+    // Check if it's the player's turn
+    if (gameState.current_player !== socket.id) {
+        return { valid: false, message: 'It is not your turn' };
+    }
+    
+    // Validate specific actions
+    switch (actionType) {
+        case 'move':
+            if (!actionData.target_position) {
+                return { valid: false, message: 'Move action requires a target position' };
+            }
+            break;
+            
+        case 'explore':
+            if (currentPlayer.movement_points <= 0) {
+                return { valid: false, message: 'No movement points remaining' };
+            }
+            break;
+            
+        case 'meet':
+        case 'rob':
+            // Check if there are other players in the same position
+            const samePositionPlayers = Object.values(gameState.players).filter(p => 
+                p.id !== currentPlayer.id &&
+                p.position.tile_x === currentPlayer.position.tile_x &&
+                p.position.tile_y === currentPlayer.position.tile_y &&
+                p.position.sub_x === currentPlayer.position.sub_x &&
+                p.position.sub_y === currentPlayer.position.sub_y &&
+                p.position.floor === currentPlayer.position.floor
+            );
+            
+            if (samePositionPlayers.length === 0) {
+                return { valid: false, message: `No other players at your position for ${actionType} action` };
+            }
+            break;
+    }
+    
+    return { valid: true, message: '' };
+}
+
+// Initialize the game when page loads
+window.addEventListener('load', function() {
+    initGame();
+    addLog('Welcome to NMB Game!', 'system');
+    addLog('Create a new game or join an existing one to start playing.', 'system');
+});
