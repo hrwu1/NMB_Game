@@ -551,8 +551,8 @@ button:disabled {
 
 .board-grid {
     display: grid;
-    grid-template-columns: repeat(16, 24px);
-    grid-template-rows: repeat(16, 24px);
+    grid-template-columns: repeat(20, 24px);
+    grid-template-rows: repeat(20, 24px);
     gap: 2px;
     margin: 20px auto;
     justify-content: center;

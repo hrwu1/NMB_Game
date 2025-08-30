@@ -212,13 +212,13 @@ function updateGameBoard() {
         return;
     }
     
-    // Create board grid - 16x16 sub-positions (4x4 tiles with 4x4 sub-positions each)
+    // Create board grid - 20x20 sub-positions (5x5 tiles with 4x4 sub-positions each)
     const gridDiv = document.createElement('div');
     gridDiv.className = 'board-grid';
     
-    // Create 16x16 sub-position grid
-    for (let abs_y = 0; abs_y < 16; abs_y++) {
-        for (let abs_x = 0; abs_x < 16; abs_x++) {
+    // Create 20x20 sub-position grid
+    for (let abs_y = 0; abs_y < 20; abs_y++) {
+        for (let abs_x = 0; abs_x < 20; abs_x++) {
             const subDiv = document.createElement('div');
             subDiv.className = 'board-tile';
             
@@ -498,7 +498,7 @@ function performAction(actionType) {
             
             // Handle movement across tile boundary
             if (newSubX > 3) {
-                newTileX = Math.min(pos.tile_x + 1, 3);
+                newTileX = Math.min(pos.tile_x + 1, 4);
                 newSubX = 0;
             }
             
@@ -511,7 +511,7 @@ function performAction(actionType) {
             };
         } else {
             // Legacy format fallback
-            const newX = Math.min(pos[0] + 1, 3);  // Updated to 4x4 range
+            const newX = Math.min(pos[0] + 1, 4);  // Updated to 5x5 range
             actionData.target_position = { 
                 x: newX, 
                 y: pos[1], 
