@@ -6,10 +6,53 @@ Handles client connections, game creation, and player actions.
 from flask_socketio import emit, join_room, leave_room, disconnect
 from flask import request
 import logging
+import re
+import time
 from .game_manager import GameManager
 
 # Initialize game manager
 game_manager = GameManager()
+
+# Input validation functions
+def validate_player_name(name):
+    """Validate player name input"""
+    if not name or not isinstance(name, str):
+        return False, "Player name is required"
+    
+    name = name.strip()
+    if len(name) < 2:
+        return False, "Player name must be at least 2 characters"
+    if len(name) > 20:
+        return False, "Player name must be 20 characters or less"
+    if not re.match(r'^[a-zA-Z0-9\s_-]+$', name):
+        return False, "Player name can only contain letters, numbers, spaces, hyphens, and underscores"
+    
+    return True, name
+
+def validate_game_id(game_id):
+    """Validate game ID format"""
+    if not game_id or not isinstance(game_id, str):
+        return False, "Game ID is required"
+    
+    game_id = game_id.strip().upper()
+    if len(game_id) != 6:
+        return False, "Game ID must be exactly 6 characters"
+    if not re.match(r'^[A-Z0-9]+$', game_id):
+        return False, "Game ID can only contain uppercase letters and numbers"
+    
+    return True, game_id
+
+def emit_error(message, error_code=None):
+    """Emit standardized error response"""
+    error_data = {
+        'message': message,
+        'timestamp': time.time()
+    }
+    if error_code:
+        error_data['code'] = error_code
+    
+    logging.error(f"Socket error ({request.sid}): {message}")
+    emit('error', error_data)
 
 def register_socket_handlers(socketio):
     """Register all SocketIO event handlers"""
@@ -51,11 +94,27 @@ def register_socket_handlers(socketio):
     def handle_create_game(data):
         """Handle game creation request"""
         try:
-            player_name = data.get('player_name', 'Anonymous')
-            print(f"Creating game for player: {player_name}")
+            # Validate input data
+            if not data or not isinstance(data, dict):
+                emit_error("Invalid request data", "INVALID_DATA")
+                return
+            
+            player_name = data.get('player_name')
+            
+            # Validate player name
+            is_valid, validated_name = validate_player_name(player_name)
+            if not is_valid:
+                emit_error(validated_name, "INVALID_PLAYER_NAME")
+                return
+            
+            print(f"Creating game for player: {validated_name}")
             
             # Create new game
-            game_id = game_manager.create_game(player_name, request.sid)
+            game_id = game_manager.create_game(validated_name, request.sid)
+            
+            if not game_id:
+                emit_error("Failed to create game. Server may be at capacity.", "GAME_CREATION_FAILED")
+                return
             
             # Join the game room
             join_room(game_id)
@@ -63,53 +122,77 @@ def register_socket_handlers(socketio):
             # Send response to client
             emit('game_created', {
                 'game_id': game_id,
-                'player_name': player_name,
-                'message': f'Game {game_id} created successfully'
+                'player_name': validated_name,
+                'message': f'Game {game_id} created successfully',
+                'success': True
             })
             
-            print(f"Game {game_id} created for player {player_name}")
+            print(f"Game {game_id} created for player {validated_name}")
             
         except Exception as e:
             print(f"Error creating game: {e}")
-            emit('error', {'message': f'Failed to create game: {str(e)}'})
+            emit_error(f"Server error while creating game: {str(e)}", "SERVER_ERROR")
     
     @socketio.on('join_game')
     def handle_join_game(data):
         """Handle join game request"""
         try:
-            game_id = data.get('game_id')
-            player_name = data.get('player_name', 'Anonymous')
+            # Validate input data
+            if not data or not isinstance(data, dict):
+                emit_error("Invalid request data", "INVALID_DATA")
+                return
             
-            print(f"Player {player_name} attempting to join game {game_id}")
+            game_id = data.get('game_id')
+            player_name = data.get('player_name')
+            
+            # Validate game ID
+            is_valid_id, validated_game_id = validate_game_id(game_id)
+            if not is_valid_id:
+                emit_error(validated_game_id, "INVALID_GAME_ID")
+                return
+            
+            # Validate player name
+            is_valid_name, validated_name = validate_player_name(player_name)
+            if not is_valid_name:
+                emit_error(validated_name, "INVALID_PLAYER_NAME")
+                return
+            
+            print(f"Player {validated_name} attempting to join game {validated_game_id}")
+            
+            # Check if game exists
+            if not game_manager.game_exists(validated_game_id):
+                emit_error(f"Game {validated_game_id} does not exist", "GAME_NOT_FOUND")
+                return
             
             # Join the game
-            success = game_manager.join_game(game_id, player_name, request.sid)
+            success = game_manager.join_game(validated_game_id, validated_name, request.sid)
             
             if success:
                 # Join the game room
-                join_room(game_id)
+                join_room(validated_game_id)
                 
                 # Notify all players in the game
                 socketio.emit('player_joined', {
-                    'player_name': player_name,
-                    'message': f'{player_name} joined the game'
-                }, room=game_id)
+                    'player_name': validated_name,
+                    'message': f'{validated_name} joined the game'
+                }, room=validated_game_id)
                 
                 # Send success response to joining player
                 emit('game_joined', {
-                    'game_id': game_id,
-                    'player_name': player_name,
-                    'message': 'Successfully joined the game'
+                    'game_id': validated_game_id,
+                    'player_name': validated_name,
+                    'message': 'Successfully joined the game',
+                    'success': True
                 })
                 
-                print(f"Player {player_name} joined game {game_id}")
+                print(f"Player {validated_name} joined game {validated_game_id}")
                 
             else:
-                emit('error', {'message': 'Failed to join game. Game may be full or not exist.'})
+                emit_error('Failed to join game. Game may be full or you may already be in it.', "JOIN_FAILED")
                 
         except Exception as e:
             print(f"Error joining game: {e}")
-            emit('error', {'message': f'Failed to join game: {str(e)}'})
+            emit_error(f"Server error while joining game: {str(e)}", "SERVER_ERROR")
     
     @socketio.on('start_game')
     def handle_start_game(data):

@@ -51,6 +51,8 @@
             padding: 20px;
             min-width: 1200px;
             position: relative;
+            overflow: hidden; /* Prevent any child content from breaking container */
+            box-sizing: border-box;
         }
         
         /* Responsive Design */
@@ -66,6 +68,7 @@
             
             .right-panel {
                 flex: 0 0 320px;
+                max-width: 320px;
             }
         }
         
@@ -116,9 +119,12 @@
         
         .right-panel {
             flex: 0 0 350px;
+            max-width: 350px;
+            min-width: 300px;
             display: flex;
             flex-direction: column;
             gap: 15px;
+            overflow: hidden;
         }
         
         .panel {
@@ -132,6 +138,8 @@
                 inset 0 1px 0 rgba(255, 255, 255, 0.1);
             transition: all 0.3s ease;
             position: relative;
+            min-width: 0; /* Allow flex items to shrink below their content size */
+            overflow: hidden; /* Prevent content from overflowing the panel */
         }
         
         .panel::before {
@@ -940,13 +948,17 @@
             border-radius: 10px;
             padding: 15px;
             max-height: 350px;
+            max-width: 100%;
             overflow-y: auto;
+            overflow-x: hidden;
             font-size: 12px;
             line-height: 1.4;
             border: 1px solid rgba(79, 209, 199, 0.2);
             box-shadow: 
                 inset 0 1px 2px rgba(255, 255, 255, 0.05),
                 0 4px 12px rgba(0, 0, 0, 0.3);
+            word-wrap: break-word;
+            overflow-wrap: break-word;
         }
         
         .game-log::-webkit-scrollbar {
@@ -978,6 +990,11 @@
             transition: all 0.3s ease;
             opacity: 0;
             animation: fadeInUp 0.4s ease forwards;
+            max-width: 100%;
+            overflow: hidden;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            hyphens: auto;
         }
         
         .log-entry:hover {
@@ -995,6 +1012,38 @@
             color: #e2e8f0;
             margin-top: 3px;
             font-weight: 500;
+            max-width: 100%;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            white-space: pre-wrap;
+            line-height: 1.4;
+            /* Handle extremely long unbroken strings */
+            text-overflow: ellipsis;
+            display: block;
+        }
+        
+        /* Handle long URLs or code snippets in logs */
+        .log-message code,
+        .log-message pre {
+            word-break: break-all;
+            overflow-wrap: anywhere;
+            white-space: pre-wrap;
+            max-width: 100%;
+            display: inline-block;
+        }
+        
+        /* Additional constraints for log panel within right panel */
+        .right-panel .game-log {
+            width: 100%;
+            box-sizing: border-box;
+            flex-shrink: 1;
+            min-height: 200px;
+        }
+        
+        /* Ensure log entries can't expand beyond their container */
+        .log-entry * {
+            max-width: 100%;
+            box-sizing: border-box;
         }
         
         .log-action {
@@ -1153,7 +1202,8 @@
         let socket = null;
         let gameState = null;
         let currentGameId = null;
-        let currentPlayerId = null;
+        // Note: We track current player through socket.id directly, not this variable
+        // let currentPlayerId = null; // Removed - using socket.id directly instead
         let selectedFloor = 2;
         
         // Initialize the game
@@ -1224,7 +1274,49 @@
             });
             
             socket.on('error', function(data) {
-                addLog(`Error: ${data.message}`, 'error');
+                const errorMessage = data.message || data.reason || 'Unknown server error';
+                addLog(`Server Error: ${errorMessage}`, 'error');
+                console.error('Socket error:', data);
+            });
+            
+            // Enhanced connection event handlers
+            socket.on('connect_error', function(error) {
+                console.error('Connection error:', error);
+                handleNetworkError(error);
+            });
+            
+            socket.on('disconnect', function(reason) {
+                console.log('Disconnected:', reason);
+                updateConnectionStatus(false);
+                addLog(`Disconnected: ${reason}`, 'warning');
+                
+                if (reason === 'io server disconnect') {
+                    // Server disconnected us, don't try to reconnect automatically
+                    addLog('Server disconnected the connection. Please refresh the page.', 'error');
+                } else {
+                    // Client-side disconnect, try to reconnect
+                    addLog('Attempting to reconnect...', 'system');
+                }
+            });
+            
+            socket.on('reconnect', function(attemptNumber) {
+                console.log('Reconnected after', attemptNumber, 'attempts');
+                updateConnectionStatus(true);
+                addLog(`Reconnected successfully!`, 'success');
+                
+                // Re-join game if we were in one
+                if (currentGameId) {
+                    const playerName = document.getElementById('playerName').value.trim();
+                    if (playerName) {
+                        socket.emit('join_game', { game_id: currentGameId, player_name: playerName });
+                        addLog('Rejoining game...', 'system');
+                    }
+                }
+            });
+            
+            socket.on('reconnect_error', function(error) {
+                console.error('Reconnection failed:', error);
+                addLog('Failed to reconnect. Please refresh the page.', 'error');
             });
         }
         
@@ -1274,17 +1366,8 @@
         function getCurrentPlayer() {
             if (!gameState || !gameState.players) return null;
             
-            // Try to find player by socket ID or use first player
-            for (const [socketId, player] of Object.entries(gameState.players)) {
-                if (socketId === socket.id || !currentPlayerId) {
-                    currentPlayerId = socketId;
-                    return player;
-                }
-                if (socketId === currentPlayerId) {
-                    return player;
-                }
-            }
-            return null;
+            // Find the player that matches this client's socket ID
+            return gameState.players[socket.id] || null;
         }
         
         function updatePlayerStatus(player) {
@@ -1315,7 +1398,7 @@
             }
             
             // Update turn indicator
-            const isCurrentTurn = gameState.current_player === currentPlayerId;
+            const isCurrentTurn = gameState.current_player === socket.id;
             const turnIndicator = document.getElementById('turn-indicator');
             turnIndicator.textContent = isCurrentTurn ? '🎯 Your Turn' : '⏳ Waiting';
         }
@@ -1423,7 +1506,7 @@
                 return;
             }
             
-            const isMyTurn = gameState.current_player === currentPlayerId;
+            const isMyTurn = gameState.current_player === socket.id;
             const currentPlayer = getCurrentPlayer();
             
             if (!isMyTurn) {
@@ -1503,29 +1586,75 @@
             `).join('');
         }
         
-        // Game action functions
+        // Game action functions with enhanced validation
         function createGame() {
             const playerName = document.getElementById('playerName').value.trim();
-            if (!playerName) {
-                addLog('Please enter a player name', 'error');
+            
+            // Validate player name
+            const validation = validatePlayerName(playerName);
+            if (!validation.valid) {
+                addLog(validation.message, 'error');
                 return;
             }
             
+            // Check connection
+            if (!socket || !socket.connected) {
+                addLog('Not connected to server. Please wait for connection.', 'error');
+                return;
+            }
+            
+            // Disable button to prevent multiple clicks
+            const createBtn = document.getElementById('createGameBtn');
+            createBtn.disabled = true;
+            createBtn.textContent = 'Creating...';
+            
             socket.emit('create_game', { player_name: playerName });
-            addLog('Creating game...', 'system');
+            addLog(`Creating game for player: ${playerName}`, 'system');
+            
+            // Re-enable button after timeout
+            setTimeout(() => {
+                createBtn.disabled = false;
+                createBtn.textContent = 'Create New Game';
+            }, 3000);
         }
         
         function joinGame() {
             const playerName = document.getElementById('playerName').value.trim();
-            const gameId = document.getElementById('gameId').value.trim();
+            const gameId = document.getElementById('gameId').value.trim().toUpperCase();
             
-            if (!playerName || !gameId) {
-                addLog('Please enter both player name and game ID', 'error');
+            // Validate player name
+            const nameValidation = validatePlayerName(playerName);
+            if (!nameValidation.valid) {
+                addLog(nameValidation.message, 'error');
                 return;
             }
             
+            // Validate game ID
+            const gameIdValidation = validateGameId(gameId);
+            if (!gameIdValidation.valid) {
+                addLog(gameIdValidation.message, 'error');
+                return;
+            }
+            
+            // Check connection
+            if (!socket || !socket.connected) {
+                addLog('Not connected to server. Please wait for connection.', 'error');
+                return;
+            }
+            
+            // Disable button to prevent multiple clicks
+            const joinBtn = document.getElementById('joinGameBtn');
+            joinBtn.disabled = true;
+            joinBtn.textContent = 'Joining...';
+            
             socket.emit('join_game', { game_id: gameId, player_name: playerName });
-            addLog('Joining game...', 'system');
+            addLog(`Joining game ${gameId} as ${playerName}`, 'system');
+            
+            // Re-enable button after timeout
+            setTimeout(() => {
+                joinBtn.disabled = false;
+                joinBtn.textContent = 'Join Game';
+            }, 3000);
         }
         
         function startGame() {
@@ -1541,14 +1670,20 @@
         function performAction(actionType) {
             console.log(`🔍 DEBUG: performAction called with actionType: ${actionType}`);
             
+            // Check connection first
+            if (!socket || !socket.connected) {
+                addLog('Not connected to server. Please reconnect.', 'error');
+                return;
+            }
+            
             if (!currentGameId || !gameState) {
-                addLog('No active game', 'error');
+                addLog('No active game session', 'error');
                 console.log('❌ DEBUG: No active game or game state');
                 return;
             }
             
             console.log('✅ DEBUG: Game state exists, proceeding...');
-            let actionData = {}; // Changed from const to let so we can reassign if needed
+            let actionData = {};
             
             // Handle different action types
             if (actionType === 'move') {
@@ -1590,7 +1725,21 @@
                 // actionData is already {} so no need to reassign
             }
             
+            // Validate action before sending
+            const validation = validateAction(actionType, actionData);
+            if (!validation.valid) {
+                addLog(validation.message, 'warning');
+                return;
+            }
+            
             console.log(`🔍 DEBUG: About to emit action - type: ${actionType}, data:`, actionData);
+            
+            // Disable action buttons temporarily to prevent spam
+            const actionButtons = document.querySelectorAll('.action-btn');
+            actionButtons.forEach(btn => {
+                btn.disabled = true;
+                btn.style.opacity = '0.6';
+            });
             
             socket.emit('player_action', {
                 action_type: actionType,
@@ -1599,10 +1748,18 @@
             
             console.log('✅ DEBUG: Action emitted successfully');
             addLog(`Performing action: ${actionType}`, 'action');
+            
+            // Re-enable action buttons after a short delay
+            setTimeout(() => {
+                actionButtons.forEach(btn => {
+                    btn.disabled = false;
+                    btn.style.opacity = '1';
+                });
+            }, 1000);
         }
         
         function handleSubPositionClick(tile_x, tile_y, sub_x, sub_y) {
-            if (!gameState || gameState.current_player !== currentPlayerId) {
+            if (!gameState || gameState.current_player !== socket.id) {
                 return;
             }
             
@@ -1652,26 +1809,224 @@
             }
         }
         
-        // Utility functions
+        // Enhanced error handling and utility functions
         function addLog(message, type = 'system') {
             const logDiv = document.getElementById('game-log');
             const timestamp = new Date().toLocaleTimeString();
             
+            // Truncate extremely long messages to prevent layout issues
+            let displayMessage = message;
+            if (message.length > 500) {
+                displayMessage = message.substring(0, 480) + '... (truncated)';
+            }
+            
+            // Add appropriate icons for different log types
+            const icons = {
+                'info': 'ℹ️',
+                'action': '⚡',
+                'error': '❌',
+                'system': '🔧',
+                'success': '✅',
+                'warning': '⚠️'
+            };
+            
+            const icon = icons[type] || 'ℹ️';
+            
             const logEntry = document.createElement('div');
             logEntry.className = `log-entry log-${type}`;
             
+            // Escape HTML to prevent XSS and layout issues
+            const escapedMessage = displayMessage
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+            
             logEntry.innerHTML = `
-                <div class="log-timestamp">${timestamp}</div>
-                <div class="log-message">${message}</div>
+                <div class="log-timestamp">${icon} ${timestamp}</div>
+                <div class="log-message">${escapedMessage}</div>
             `;
             
+            // Add title attribute for full message if truncated
+            if (message.length > 500) {
+                logEntry.title = message;
+            }
+            
             // Remove old entries if too many
-            while (logDiv.children.length > 50) {
+            while (logDiv.children.length > 100) {
                 logDiv.removeChild(logDiv.firstChild);
             }
             
             logDiv.appendChild(logEntry);
             logDiv.scrollTop = logDiv.scrollHeight;
+            
+            // Show toast notification for errors and important messages
+            if (type === 'error' || type === 'warning') {
+                showToast(message, type);
+            }
+        }
+        
+        // Toast notification system
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            
+            // Truncate toast messages too
+            let displayMessage = message;
+            if (message.length > 200) {
+                displayMessage = message.substring(0, 180) + '...';
+            }
+            
+            toast.textContent = displayMessage;
+            
+            // Style the toast
+            Object.assign(toast.style, {
+                position: 'fixed',
+                top: '20px',
+                right: '20px',
+                padding: '12px 20px',
+                borderRadius: '8px',
+                color: 'white',
+                fontWeight: 'bold',
+                zIndex: '1000',
+                transform: 'translateX(100%)',
+                transition: 'transform 0.3s ease',
+                maxWidth: '300px',
+                minWidth: '200px',
+                wordWrap: 'break-word',
+                overflowWrap: 'break-word',
+                wordBreak: 'break-word',
+                boxSizing: 'border-box'
+            });
+            
+            // Set background based on type
+            const backgrounds = {
+                'error': 'linear-gradient(135deg, #ef4444, #dc2626)',
+                'warning': 'linear-gradient(135deg, #f59e0b, #d97706)',
+                'success': 'linear-gradient(135deg, #10b981, #059669)',
+                'info': 'linear-gradient(135deg, #3b82f6, #2563eb)'
+            };
+            
+            toast.style.background = backgrounds[type] || backgrounds.info;
+            toast.style.boxShadow = '0 8px 20px rgba(0, 0, 0, 0.3)';
+            
+            document.body.appendChild(toast);
+            
+            // Animate in
+            setTimeout(() => {
+                toast.style.transform = 'translateX(0)';
+            }, 100);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                toast.style.transform = 'translateX(100%)';
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        document.body.removeChild(toast);
+                    }
+                }, 300);
+            }, 5000);
+        }
+        
+        // Enhanced input validation
+        function validatePlayerName(name) {
+            if (!name || name.trim().length === 0) {
+                return { valid: false, message: 'Player name cannot be empty' };
+            }
+            if (name.trim().length < 2) {
+                return { valid: false, message: 'Player name must be at least 2 characters' };
+            }
+            if (name.trim().length > 20) {
+                return { valid: false, message: 'Player name must be 20 characters or less' };
+            }
+            if (!/^[a-zA-Z0-9\s_-]+$/.test(name.trim())) {
+                return { valid: false, message: 'Player name can only contain letters, numbers, spaces, hyphens, and underscores' };
+            }
+            return { valid: true, message: '' };
+        }
+        
+        function validateGameId(gameId) {
+            if (!gameId || gameId.trim().length === 0) {
+                return { valid: false, message: 'Game ID cannot be empty' };
+            }
+            if (gameId.trim().length !== 6) {
+                return { valid: false, message: 'Game ID must be exactly 6 characters' };
+            }
+            if (!/^[A-Z0-9]+$/.test(gameId.trim())) {
+                return { valid: false, message: 'Game ID can only contain uppercase letters and numbers' };
+            }
+            return { valid: true, message: '' };
+        }
+        
+        // Network error handling
+        function handleNetworkError(error) {
+            console.error('Network error:', error);
+            addLog('Connection lost. Attempting to reconnect...', 'error');
+            showToast('Connection lost. Please check your internet connection.', 'error');
+            
+            // Update connection status
+            const status = document.getElementById('connection-status');
+            status.textContent = 'Reconnecting...';
+            status.className = 'connection-status disconnected';
+            
+            // Try to reconnect after a delay
+            setTimeout(() => {
+                if (socket && !socket.connected) {
+                    socket.connect();
+                }
+            }, 2000);
+        }
+        
+        // Action validation before sending to server
+        function validateAction(actionType, actionData) {
+            if (!currentGameId || !gameState) {
+                return { valid: false, message: 'No active game session' };
+            }
+            
+            const currentPlayer = getCurrentPlayer();
+            if (!currentPlayer) {
+                return { valid: false, message: 'Player not found in game' };
+            }
+            
+            // Check if it's the player's turn
+            if (gameState.current_player !== socket.id) {
+                return { valid: false, message: 'It is not your turn' };
+            }
+            
+            // Validate specific actions
+            switch (actionType) {
+                case 'move':
+                    if (!actionData.target_position) {
+                        return { valid: false, message: 'Move action requires a target position' };
+                    }
+                    break;
+                    
+                case 'explore':
+                    if (currentPlayer.movement_points <= 0) {
+                        return { valid: false, message: 'No movement points remaining' };
+                    }
+                    break;
+                    
+                case 'meet':
+                case 'rob':
+                    // Check if there are other players in the same position
+                    const samePositionPlayers = Object.values(gameState.players).filter(p => 
+                        p.id !== currentPlayer.id &&
+                        p.position.tile_x === currentPlayer.position.tile_x &&
+                        p.position.tile_y === currentPlayer.position.tile_y &&
+                        p.position.sub_x === currentPlayer.position.sub_x &&
+                        p.position.sub_y === currentPlayer.position.sub_y &&
+                        p.position.floor === currentPlayer.position.floor
+                    );
+                    
+                    if (samePositionPlayers.length === 0) {
+                        return { valid: false, message: `No other players at your position for ${actionType} action` };
+                    }
+                    break;
+            }
+            
+            return { valid: true, message: '' };
         }
         
         // Initialize the game when page loads

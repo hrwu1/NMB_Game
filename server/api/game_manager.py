@@ -42,6 +42,10 @@ class GameManager:
         logging.info(f"Game {game_id} created by {player_name}")
         return game_id
     
+    def game_exists(self, game_id: str) -> bool:
+        """Check if a game with the given ID exists"""
+        return game_id in self.games
+    
     def join_game(self, game_id: str, player_name: str, socket_id: str) -> bool:
         """Join an existing game session"""
         if game_id not in self.games:
