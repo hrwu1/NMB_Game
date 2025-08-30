@@ -5,10 +5,64 @@ let currentGameId = null;
 // Note: We track current player through socket.id directly, not this variable
 // let currentPlayerId = null; // Removed - using socket.id directly instead
 let selectedFloor = 2;
+let gameConfig = null; // Store game configuration from server
 
 // Initialize the game
-function initGame() {
-    connectToServer();
+async function initGame() {
+    try {
+        // Fetch game configuration first
+        await loadGameConfig();
+        connectToServer();
+    } catch (error) {
+        console.error('Failed to load game configuration:', error);
+        addLog('Failed to load game configuration. Using defaults.', 'warning');
+        // Use fallback config
+        gameConfig = {
+            board: {
+                size: [5, 5],
+                grid_size: 20,
+                tile_size: 4
+            }
+        };
+        connectToServer();
+    }
+}
+
+// Load game configuration from server
+async function loadGameConfig() {
+    try {
+        console.log('Attempting to fetch game configuration from server...');
+        
+        const response = await fetch('http://localhost:5000/api/config');
+        
+        console.log('Response received:', response.status, response.statusText);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        gameConfig = await response.json();
+        console.log('Game configuration loaded successfully:', gameConfig);
+        
+        // Validate configuration structure
+        if (!gameConfig.board || !gameConfig.board.size) {
+            throw new Error('Invalid configuration structure received');
+        }
+        
+        // Set CSS custom properties for dynamic grid sizing
+        const root = document.documentElement;
+        const gridSize = gameConfig.board.grid_size;
+        root.style.setProperty('--board-grid-size', gridSize);
+        root.style.setProperty('--tile-size', '24px');
+        
+        addLog(`Configuration loaded: ${gameConfig.board.size[0]}x${gameConfig.board.size[1]} board`, 'system');
+        
+    } catch (error) {
+        console.error('Detailed error loading game config:', error);
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
+        throw error;
+    }
 }
 
 // Socket connection management
@@ -212,21 +266,31 @@ function updateGameBoard() {
         return;
     }
     
-    // Create board grid - 20x20 sub-positions (5x5 tiles with 4x4 sub-positions each)
+    if (!gameConfig) {
+        boardElement.innerHTML = '<div class="board-message">Loading board configuration...</div>';
+        return;
+    }
+    
+    // Use dynamic board configuration
+    const gridSize = gameConfig.board.grid_size;
+    const tileSize = gameConfig.board.tile_size;
+    const boardSize = gameConfig.board.size;
+    
+    // Create board grid dynamically based on configuration
     const gridDiv = document.createElement('div');
     gridDiv.className = 'board-grid';
     
-    // Create 20x20 sub-position grid
-    for (let abs_y = 0; abs_y < 20; abs_y++) {
-        for (let abs_x = 0; abs_x < 20; abs_x++) {
+    // Create dynamic sub-position grid
+    for (let abs_y = 0; abs_y < gridSize; abs_y++) {
+        for (let abs_x = 0; abs_x < gridSize; abs_x++) {
             const subDiv = document.createElement('div');
             subDiv.className = 'board-tile';
             
             // Calculate which tile this sub-position belongs to
-            const tile_x = Math.floor(abs_x / 4);
-            const tile_y = Math.floor(abs_y / 4);
-            const sub_x = abs_x % 4;
-            const sub_y = abs_y % 4;
+            const tile_x = Math.floor(abs_x / tileSize);
+            const tile_y = Math.floor(abs_y / tileSize);
+            const sub_x = abs_x % tileSize;
+            const sub_y = abs_y % tileSize;
             
             subDiv.dataset.tileX = tile_x;
             subDiv.dataset.tileY = tile_y;
@@ -498,7 +562,7 @@ function performAction(actionType) {
             
             // Handle movement across tile boundary
             if (newSubX > 3) {
-                newTileX = Math.min(pos.tile_x + 1, 4);
+                newTileX = Math.min(pos.tile_x + 1, gameConfig.board.size[0] - 1);
                 newSubX = 0;
             }
             
@@ -511,7 +575,7 @@ function performAction(actionType) {
             };
         } else {
             // Legacy format fallback
-            const newX = Math.min(pos[0] + 1, 4);  // Updated to 5x5 range
+            const newX = Math.min(pos[0] + 1, gameConfig.board.size[0] - 1);  // Dynamic board range
             actionData.target_position = { 
                 x: newX, 
                 y: pos[1], 
@@ -828,6 +892,74 @@ function validateAction(actionType, actionData) {
     
     return { valid: true, message: '' };
 }
+
+// Test function for debugging configuration loading
+window.testConfigEndpoint = async function() {
+    console.log('=== Testing Configuration Endpoint ===');
+    try {
+        console.log('1. Attempting fetch...');
+        const response = await fetch('http://localhost:5000/api/config');
+        
+        console.log('2. Response object:', response);
+        console.log('3. Response status:', response.status);
+        console.log('4. Response ok:', response.ok);
+        console.log('5. Response headers:');
+        for (let [key, value] of response.headers.entries()) {
+            console.log(`   ${key}: ${value}`);
+        }
+        
+        console.log('6. Getting response text...');
+        const text = await response.text();
+        console.log('7. Raw response text:', text);
+        
+        if (!text) {
+            console.error('8. Empty response!');
+            return null;
+        }
+        
+        console.log('8. Parsing JSON...');
+        const config = JSON.parse(text);
+        console.log('9. Parsed configuration:', config);
+        
+        return config;
+    } catch (error) {
+        console.error('Test failed at step:', error.message);
+        console.error('Full error:', error);
+        return null;
+    }
+};
+
+// Simple test without fetch API
+window.testConfigSimple = function() {
+    console.log('=== Simple XMLHttpRequest Test ===');
+    
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', 'http://localhost:5000/api/config', true);
+    
+    xhr.onreadystatechange = function() {
+        console.log('ReadyState:', xhr.readyState, 'Status:', xhr.status);
+        
+        if (xhr.readyState === 4) {
+            if (xhr.status === 200) {
+                console.log('Success! Response:', xhr.responseText);
+                try {
+                    const config = JSON.parse(xhr.responseText);
+                    console.log('Parsed config:', config);
+                } catch (e) {
+                    console.error('JSON parse error:', e);
+                }
+            } else {
+                console.error('Request failed:', xhr.status, xhr.statusText);
+            }
+        }
+    };
+    
+    xhr.onerror = function() {
+        console.error('Network error occurred');
+    };
+    
+    xhr.send();
+};
 
 // Initialize the game when page loads
 window.addEventListener('load', function() {

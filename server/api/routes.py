@@ -1,10 +1,11 @@
 """
-SocketIO event handlers for the NMB Game server.
-Handles client connections, game creation, and player actions.
+SocketIO event handlers and HTTP routes for the NMB Game server.
+Handles client connections, game creation, player actions, and API endpoints.
 """
 
 from flask_socketio import emit, join_room, leave_room, disconnect
-from flask import request
+from flask import request, jsonify
+from flask_cors import cross_origin
 import logging
 import re
 import time
@@ -276,4 +277,51 @@ def register_socket_handlers(socketio):
             print(f"Error getting game state: {e}")
             emit('error', {'message': f'Failed to get game state: {str(e)}'})
     
-    print("✅ SocketIO event handlers registered successfully")
+    print("[OK] SocketIO event handlers registered successfully")
+
+def register_http_routes(app):
+    """Register HTTP API routes"""
+    
+    @app.route('/api/config')
+    def get_config():
+        """Get game configuration including board dimensions"""
+        from game_logic.constants import BOARD_SIZE, INITIAL_POSITION, FLOOR_COUNT, FLOOR_RANGE
+        from flask import make_response
+        
+        config = {
+            'board': {
+                'size': BOARD_SIZE,
+                'initial_position': INITIAL_POSITION,
+                'grid_size': BOARD_SIZE[0] * 4,  # Total sub-positions (tiles * 4)
+                'tile_size': 4  # Each tile is 4x4 sub-positions
+            },
+            'floors': {
+                'count': FLOOR_COUNT,
+                'range': FLOOR_RANGE,
+                'starting_floor': 2
+            }
+        }
+        
+        # Create response with explicit CORS headers
+        response = make_response(jsonify(config))
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
+        
+        print(f"[API] Config endpoint called, sending: {config}")
+        return response
+    
+    @app.route('/api/config', methods=['OPTIONS'])
+    def config_options():
+        """Handle preflight OPTIONS request for /api/config"""
+        from flask import make_response
+        
+        response = make_response()
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
+        
+        print("[API] Config OPTIONS preflight handled")
+        return response
+    
+    print("[OK] HTTP routes registered successfully")

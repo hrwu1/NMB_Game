@@ -133,18 +133,18 @@ def action_move(game, socket_id: str, move_data: Dict[str, Any]) -> Dict[str, An
 
 def action_explore(game, socket_id: str, explore_data: Dict[str, Any]) -> Dict[str, Any]:
     """Handle explore action - draw and place new path tile"""
-    print(f"🔍 DEBUG: Explore action called! socket_id: {socket_id}, data: {explore_data}")
+    print(f"[DEBUG] Explore action called! socket_id: {socket_id}, data: {explore_data}")
     
     is_valid, reason = validate_action(game, socket_id, ActionType.EXPLORE.value)
     if not is_valid:
-        print(f"❌ DEBUG: Explore action validation failed: {reason}")
+        print(f"[ERROR] Explore action validation failed: {reason}")
         return {"success": False, "reason": reason}
     
-    print("✅ DEBUG: Explore action validation passed!")
+    print("[OK] Explore action validation passed!")
     
     player = game.players[socket_id]
     placement_position = explore_data.get("placement_position")
-    print(f"🔍 DEBUG: Player: {player.name}, placement_position: {placement_position}")
+    print(f"[DEBUG] Player: {player.name}, placement_position: {placement_position}")
     
     # If no placement position specified, find the best adjacent position automatically
     if not placement_position:

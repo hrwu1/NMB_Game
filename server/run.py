@@ -9,7 +9,7 @@ from flask_cors import CORS
 import os
 
 # Import our modules
-from api.routes import register_socket_handlers
+from api.routes import register_socket_handlers, register_http_routes
 from config import Config
 
 def create_app():
@@ -17,8 +17,10 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
     
-    # Enable CORS for cross-origin requests from frontend
-    CORS(app, cors_allowed_origins="*")
+    # Enable CORS for cross-origin requests from frontend (including file:// origins)
+    CORS(app, cors_allowed_origins="*", supports_credentials=True, 
+         allow_headers=["Content-Type", "Authorization", "Accept"],
+         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
     
     # Initialize SocketIO
     socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
@@ -44,6 +46,8 @@ def create_app():
         """Simple health check endpoint"""
         return {'status': 'ok', 'message': 'NMB Game server is running'}
     
+    register_http_routes(app)
+    
     return app, socketio
 
 if __name__ == '__main__':
@@ -55,8 +59,8 @@ if __name__ == '__main__':
     host = config.get('HOST', '0.0.0.0')
     debug = config.get('DEBUG', True)
     
-    print(f"🎮 Starting NMB Game server on {host}:{port}...")
-    print(f"🌐 Server will be accessible at http://localhost:{port}")
-    print(f"🔧 Debug mode: {debug}")
+    print(f"[GAME] Starting NMB Game server on {host}:{port}...")
+    print(f"[WEB] Server will be accessible at http://localhost:{port}")
+    print(f"[DEBUG] Debug mode: {debug}")
     
     socketio.run(app, host=host, port=port, debug=debug)

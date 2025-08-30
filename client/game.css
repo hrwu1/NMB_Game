@@ -1,3 +1,9 @@
+:root {
+    /* Default board configuration - will be overridden by JavaScript */
+    --board-grid-size: 20;
+    --tile-size: 24px;
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -551,8 +557,8 @@ button:disabled {
 
 .board-grid {
     display: grid;
-    grid-template-columns: repeat(20, 24px);
-    grid-template-rows: repeat(20, 24px);
+    grid-template-columns: repeat(var(--board-grid-size), var(--tile-size));
+    grid-template-rows: repeat(var(--board-grid-size), var(--tile-size));
     gap: 2px;
     margin: 20px auto;
     justify-content: center;
@@ -563,8 +569,8 @@ button:disabled {
 }
 
 .board-tile {
-    width: 24px;
-    height: 24px;
+    width: var(--tile-size);
+    height: var(--tile-size);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 4px;
     position: relative;
