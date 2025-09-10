@@ -116,10 +116,19 @@ function connectToServer() {
     });
     
     socket.on('game_state_update', function(data) {
+        const oldState = gameState ? gameState.state : null;
         gameState = data.game_state;
+        
         if (data.action_result) {
             addLog(`Action: ${JSON.stringify(data.action_result)}`, 'action');
         }
+        
+        // Check for state transitions
+        if (oldState === 'pawn_placement' && gameState.state === 'playing') {
+            addLog('🎮 All pawns placed! Normal gameplay begins!', 'success');
+            showToast('All pawns placed! Game started!', 'success');
+        }
+        
         updateGameDisplay();
         updateActionButtons();
     });
@@ -377,7 +386,58 @@ function getPlayersOnSubPosition(tile_x, tile_y, sub_x, sub_y, floor) {
 function updateActionButtons() {
     const actionsDiv = document.getElementById('action-buttons');
     
-    if (!gameState || gameState.state !== 'playing') {
+    if (!gameState) {
+        actionsDiv.innerHTML = '<p style="color: #888; text-align: center;">Game not started</p>';
+        return;
+    }
+    
+    // Handle pawn placement phase
+    if (gameState.state === 'pawn_placement') {
+        const isMyTurn = gameState.current_player === socket.id;
+        const currentPlayer = getCurrentPlayer();
+        const pawnPlacement = gameState.pawn_placement || {};
+        
+        if (!isMyTurn) {
+            actionsDiv.innerHTML = `
+                <div class="pawn-placement-info">
+                    <h4>🎯 Pawn Placement Phase</h4>
+                    <p>Players placed: ${pawnPlacement.players_placed?.length || 0}/${pawnPlacement.total_players || 0}</p>
+                    <p style="color: #888; text-align: center;">Wait for your turn</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Check if current player has already placed their pawn
+        const hasPlaced = pawnPlacement.players_placed?.includes(socket.id);
+        
+        if (hasPlaced) {
+            actionsDiv.innerHTML = `
+                <div class="pawn-placement-info">
+                    <h4>🎯 Pawn Placement Phase</h4>
+                    <p>Players placed: ${pawnPlacement.players_placed?.length || 0}/${pawnPlacement.total_players || 0}</p>
+                    <p style="color: #4CAF50; text-align: center;">✅ Pawn placed! Waiting for others...</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Player can place pawn
+        actionsDiv.innerHTML = `
+            <div class="pawn-placement-info">
+                <h4>🎯 Pawn Placement Phase</h4>
+                <p>Players placed: ${pawnPlacement.players_placed?.length || 0}/${pawnPlacement.total_players || 0}</p>
+                <p style="color: #ff9800; margin-bottom: 15px;">Your turn to place your pawn!</p>
+                <button class="action-btn primary" onclick="performAction('place_pawn')">
+                    🎯 Place Pawn
+                </button>
+            </div>
+        `;
+        return;
+    }
+    
+    // Normal gameplay phase
+    if (gameState.state !== 'playing') {
         actionsDiv.innerHTML = '<p style="color: #888; text-align: center;">Game not started</p>';
         return;
     }
@@ -581,8 +641,13 @@ function performAction(actionType) {
     console.log('✅ DEBUG: Game state exists, proceeding...');
     let actionData = {};
     
+    // Handle pawn placement action
+    if (actionType === 'place_pawn') {
+        // For now, just send empty data - server will handle placement logic
+        actionData = {};
+    } 
     // Handle different action types
-    if (actionType === 'move') {
+    else if (actionType === 'move') {
         // For now, just use current position + 1 as target (simplified)
         const currentPlayer = getCurrentPlayer();
         const pos = currentPlayer.position;

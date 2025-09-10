@@ -144,8 +144,12 @@ class GameManager:
         
         game = self.games[game_id]
         
-        # Execute the action
-        result = execute_action(game, socket_id, action_type, action_data)
+        # Handle pawn placement directly in Game class during placement phase
+        if action_type == "place_pawn":
+            result = game.place_player_pawn(socket_id, action_data)
+        else:
+            # Execute normal actions through actions.py
+            result = execute_action(game, socket_id, action_type, action_data)
         
         if result.get("success"):
             logging.info(f"Player action in game {game_id}: {action_type} by {socket_id}")

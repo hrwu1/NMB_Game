@@ -7,6 +7,7 @@ from flask import Flask
 from flask_socketio import SocketIO
 from flask_cors import CORS
 import os
+import logging
 
 # Import our modules
 from api.routes import register_socket_handlers, register_http_routes
@@ -23,7 +24,7 @@ def create_app():
          methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
     
     # Initialize SocketIO
-    socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
+    socketio = SocketIO(app, cors_allowed_origins="*", logger=False, engineio_logger=False)
     
     # Register socket event handlers
     register_socket_handlers(socketio)
@@ -52,6 +53,10 @@ def create_app():
 
 if __name__ == '__main__':
     app, socketio = create_app()
+    
+    # Suppress Werkzeug's default request logs
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
     
     # Get configuration
     config = app.config

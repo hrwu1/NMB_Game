@@ -18,6 +18,7 @@ class GameState(Enum):
     """Game state enumeration"""
     WAITING = "waiting"
     STARTING = "starting"
+    PAWN_PLACEMENT = "pawn_placement"  # New phase for initial pawn placement
     PLAYING = "playing"
     PAUSED = "paused"
     FINISHED = "finished"
@@ -66,6 +67,9 @@ class Game:
         self.corruption_events = []
         self.active_anomalies: List[AnomalyCard] = []
         self.escape_exits_revealed = False
+        
+        # Pawn placement tracking
+        self.players_placed_pawns: set = set()  # Track which players have placed pawns
         
         self._log_event("game_created", f"Game {self.game_id} created")
     
@@ -159,22 +163,21 @@ class Game:
         # Determine player order
         self._determine_player_order()
         
-        # Initialize game state
-        self.state = GameState.PLAYING
-        self.round_number = 1
+        # Initialize game state to pawn placement phase
+        self.state = GameState.PAWN_PLACEMENT
+        self.round_number = 0  # Start at 0 during placement phase
         self.turn_number = 1
         self.current_phase = GamePhase.EXPLORATION
         
-        # Give each player starting hand and set initial position
+        # Give each player starting hand (but NOT position)
         for player in self.players.values():
             self._deal_starting_hand(player)
-            self._set_player_initial_position(player)
         
-        # Start first player's turn
+        # Start first player's turn for pawn placement
         self._start_next_turn()
         
-        self._log_event("game_started", f"Game started with {len(self.players)} players")
-        return {"success": True, "message": "Game started successfully"}
+        self._log_event("game_started", f"Game started with {len(self.players)} players - pawn placement phase")
+        return {"success": True, "message": "Game started - place your pawns!"}
     
     def _determine_player_order(self) -> None:
         """Determine turn order by rolling D12"""
@@ -213,6 +216,77 @@ class Game:
             floor=INITIAL_FLOOR
         )
         player.floor = INITIAL_FLOOR
+    
+    def place_player_pawn(self, socket_id: str, placement_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle player pawn placement during initial phase"""
+        if self.state != GameState.PAWN_PLACEMENT:
+            return {"success": False, "reason": "Not in pawn placement phase"}
+        
+        if socket_id not in self.players:
+            return {"success": False, "reason": "Player not found"}
+        
+        if not self.is_player_turn(socket_id):
+            return {"success": False, "reason": "Not your turn"}
+        
+        if socket_id in self.players_placed_pawns:
+            return {"success": False, "reason": "You have already placed your pawn"}
+        
+        player = self.players[socket_id]
+        
+        # For now, always place on the initial tile at center position
+        # Later we can allow choosing specific sub-positions
+        from .board import Position
+        player.position = Position(
+            tile_x=INITIAL_POSITION[0],
+            tile_y=INITIAL_POSITION[1],
+            sub_x=1,  # Center of tile
+            sub_y=1,
+            floor=INITIAL_FLOOR
+        )
+        player.floor = INITIAL_FLOOR
+        
+        # Mark player as having placed their pawn
+        self.players_placed_pawns.add(socket_id)
+        
+        self._log_event("pawn_placed", f"{player.name} placed their pawn")
+        
+        # Automatically end turn after placing pawn
+        self._advance_pawn_placement_turn()
+        
+        return {
+            "success": True, 
+            "message": f"Pawn placed successfully!",
+            "players_placed": len(self.players_placed_pawns),
+            "total_players": len(self.players)
+        }
+    
+    def _advance_pawn_placement_turn(self) -> None:
+        """Advance turn during pawn placement phase"""
+        # Move to next player
+        self.current_player_index = (self.current_player_index + 1) % len(self.player_order)
+        self.turn_number += 1
+        
+        # Check if all players have placed pawns
+        if len(self.players_placed_pawns) >= len(self.players):
+            self._transition_to_normal_gameplay()
+        else:
+            # Start next player's turn
+            self._start_next_turn()
+    
+    def _transition_to_normal_gameplay(self) -> None:
+        """Transition from pawn placement to normal gameplay"""
+        self.state = GameState.PLAYING
+        self.round_number = 1
+        self.turn_number = 1
+        self.current_player_index = 0  # Reset to first player
+        
+        # Start normal gameplay
+        self._start_next_turn()
+        
+        self._log_event("gameplay_started", "All pawns placed - normal gameplay begins!")
+        
+        # Clear placement tracking
+        self.players_placed_pawns.clear()
     
     def _start_next_turn(self) -> None:
         """Start the next player's turn"""
@@ -522,7 +596,14 @@ class Game:
             # Phase-specific info
             "corruption_percentage": self.board.get_corruption_percentage(),
             "active_anomalies": len(self.active_anomalies),
-            "escape_exits_revealed": self.escape_exits_revealed
+            "escape_exits_revealed": self.escape_exits_revealed,
+            
+            # Pawn placement info
+            "pawn_placement": {
+                "players_placed": list(self.players_placed_pawns),
+                "total_players": len(self.players),
+                "placement_complete": len(self.players_placed_pawns) >= len(self.players)
+            }
         }
     
     def is_player_turn(self, socket_id: str) -> bool:
@@ -550,9 +631,16 @@ class Game:
         if not self.is_player_turn(socket_id):
             return ["wait"]  # Can only wait if not their turn
         
+        # During pawn placement phase, only allow pawn placement
+        if self.state == GameState.PAWN_PLACEMENT:
+            if socket_id in self.players_placed_pawns:
+                return ["wait"]  # Already placed pawn, can only wait
+            else:
+                return ["place_pawn"]  # Can only place pawn
+        
         actions = []
         
-        # Basic actions
+        # Basic actions (only during normal gameplay)
         if player.get_remaining_movement() > 0:
             actions.extend(["move", "explore" if can_explore(player.disorder) else "fall"])
         
