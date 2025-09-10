@@ -40,10 +40,12 @@ class Game:
         
         # Players
         self.players: Dict[str, Player] = {}  # socket_id -> Player
+        self.player_numbers: Dict[str, int] = {}  # socket_id -> player_number (1-4)
         self.player_order: List[str] = []  # Turn order by socket_id
         self.current_player_index = 0
         self.max_players = max_players
         self.host_socket_id: Optional[str] = None
+        self.next_player_number = 1  # Track next available player number
         
         # Game components
         self.board = Board()
@@ -79,6 +81,10 @@ class Game:
         if self.state != GameState.WAITING:
             return False
         
+        # Assign stable player number
+        self.player_numbers[player.socket_id] = self.next_player_number
+        self.next_player_number += 1
+        
         self.players[player.socket_id] = player
         
         # First player becomes host
@@ -86,7 +92,7 @@ class Game:
             self.host_socket_id = player.socket_id
             player.is_host = True
         
-        self._log_event("player_joined", f"{player.name} joined the game")
+        self._log_event("player_joined", f"{player.name} joined the game as Player {self.player_numbers[player.socket_id]}")
         self.last_updated = datetime.now()
         return True
     
@@ -96,6 +102,10 @@ class Game:
             return None
         
         player = self.players.pop(socket_id)
+        
+        # Remove player number mapping
+        if socket_id in self.player_numbers:
+            self.player_numbers.pop(socket_id)
         
         # Remove from turn order
         if socket_id in self.player_order:
@@ -155,9 +165,10 @@ class Game:
         self.turn_number = 1
         self.current_phase = GamePhase.EXPLORATION
         
-        # Give each player starting hand
+        # Give each player starting hand and set initial position
         for player in self.players.values():
             self._deal_starting_hand(player)
+            self._set_player_initial_position(player)
         
         # Start first player's turn
         self._start_next_turn()
@@ -190,6 +201,18 @@ class Game:
             card = self.decks[CardType.EFFECT].draw()
             if card:
                 player.inventory.add_to_hand(card.to_dict())
+    
+    def _set_player_initial_position(self, player: Player) -> None:
+        """Set player's initial position on the starting tile"""
+        from .board import Position  # Import at runtime to avoid circular imports
+        player.position = Position(
+            tile_x=INITIAL_POSITION[0],  # Tile at (2,2)
+            tile_y=INITIAL_POSITION[1],
+            sub_x=1,  # Center of tile
+            sub_y=1,
+            floor=INITIAL_FLOOR
+        )
+        player.floor = INITIAL_FLOOR
     
     def _start_next_turn(self) -> None:
         """Start the next player's turn"""
@@ -471,7 +494,9 @@ class Game:
             "last_updated": self.last_updated.isoformat(),
             
             # Players
-            "players": {sid: player.to_dict() for sid, player in self.players.items()},
+            "players": {sid: {**player.to_dict(), "player_number": self.player_numbers.get(sid, 1)} 
+                       for sid, player in self.players.items()},
+            "player_numbers": self.player_numbers,
             "player_order": self.player_order,
             "current_player": current_player.socket_id if current_player else None,
             "host": self.host_socket_id,

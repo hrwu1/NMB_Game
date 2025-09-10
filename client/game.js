@@ -237,11 +237,14 @@ function updatePlayerStatus(player) {
     
     // Display both tile and sub-position
     const pos = player.position;
-    if (pos.tile_x !== undefined) {
+    if (pos && pos.tile_x !== undefined) {
         document.getElementById('position-value').textContent = `T(${pos.tile_x},${pos.tile_y}) S(${pos.sub_x},${pos.sub_y})`;
-    } else {
+    } else if (pos && Array.isArray(pos)) {
         // Legacy format
-        document.getElementById('position-value').textContent = `(${player.position[0]}, ${player.position[1]})`;
+        document.getElementById('position-value').textContent = `(${pos[0]}, ${pos[1]})`;
+    } else {
+        // No position yet (game hasn't started)
+        document.getElementById('position-value').textContent = 'Not positioned';
     }
     
     const movementUsed = player.movement_used || 0;
@@ -332,11 +335,13 @@ function updateGameBoard() {
                 
                 // Add players on this sub-position
                 const playersOnSubPos = getPlayersOnSubPosition(tile_x, tile_y, sub_x, sub_y, selectedFloor);
-                playersOnSubPos.forEach((player, index) => {
+                playersOnSubPos.forEach((player) => {
                     const pawnDiv = document.createElement('div');
-                    pawnDiv.className = `player-pawn player-${index + 1}`;
+                    // Use stable player number instead of array index
+                    const playerNumber = player.player_number || 1;
+                    pawnDiv.className = `player-pawn player-${playerNumber}`;
                     pawnDiv.textContent = player.name.charAt(0);
-                    pawnDiv.title = player.name;
+                    pawnDiv.title = `${player.name} (Player ${playerNumber})`;
                     subDiv.appendChild(pawnDiv);
                 });
                 
@@ -359,7 +364,9 @@ function getPlayersOnSubPosition(tile_x, tile_y, sub_x, sub_y, floor) {
     
     return Object.values(gameState.players).filter(player => {
         const pos = player.position;
-        return pos.tile_x === tile_x && 
+        // Check if player has a position (game has started) and position matches
+        return pos && 
+               pos.tile_x === tile_x && 
                pos.tile_y === tile_y &&
                pos.sub_x === sub_x &&
                pos.sub_y === sub_y &&

@@ -93,15 +93,8 @@ class Player:
         # Game state  
         self.disorder = INITIAL_DISORDER
         self.floor = INITIAL_FLOOR
-        # Position using new tile+sub-position system
-        from .board import Position  # Import at runtime to avoid circular imports
-        self.position = Position(
-            tile_x=INITIAL_POSITION[0],  # Tile 5,5 
-            tile_y=INITIAL_POSITION[1],
-            sub_x=1,  # Center of tile
-            sub_y=1,
-            floor=INITIAL_FLOOR
-        )
+        # Position - not set until game starts
+        self.position = None  # Will be set when game starts
         self.current_tile_id: Optional[str] = None
         
         # Movement and actions
