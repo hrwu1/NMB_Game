@@ -39,6 +39,29 @@
                     
                     <button onclick="startGame()" id="startGameBtn" style="display: none;">Start Game</button>
                 </div>
+                
+                <!-- Game Lobby Status -->
+                <div class="lobby-status" id="lobbyStatus" style="display: none;">
+                    <div class="lobby-header">
+                        <h4>Game Lobby</h4>
+                        <div class="lobby-info">
+                            <span id="lobby-game-id"></span>
+                        </div>
+                    </div>
+                    <div class="player-count-status">
+                        <span id="player-count-display">0/4 players</span>
+                        <span id="lobby-status-text" class="status-waiting">Waiting for players...</span>
+                    </div>
+                    <div class="player-list">
+                        <h5>Players:</h5>
+                        <ul id="player-list" class="players-joined">
+                            <!-- Players will be added dynamically -->
+                        </ul>
+                    </div>
+                    <div class="lobby-requirements" id="lobby-requirements">
+                        <p class="requirement-text">Need at least 2 players to start</p>
+                    </div>
+                </div>
             </div>
             
             <!-- Player Status -->

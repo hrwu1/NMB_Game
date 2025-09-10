@@ -15,6 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from game_logic.game import Game, GameState
 from game_logic.player import Player
 from game_logic.actions import execute_action
+from game_logic.constants import AUTO_START_ENABLED, REQUIRED_PLAYERS_FOR_AUTO_START
 
 class GameManager:
     """Manages multiple concurrent game sessions"""
@@ -26,7 +27,7 @@ class GameManager:
         
     def create_game(self, player_name: str, socket_id: str) -> str:
         """Create a new game session"""
-        game_id = str(uuid.uuid4())[:8]  # Short game ID
+        game_id = str(uuid.uuid4())[:6].upper()  # 6-character game ID
         
         # Create new Game instance
         game = Game(game_id, self.max_players)
@@ -46,16 +47,16 @@ class GameManager:
         """Check if a game with the given ID exists"""
         return game_id in self.games
     
-    def join_game(self, game_id: str, player_name: str, socket_id: str) -> bool:
+    def join_game(self, game_id: str, player_name: str, socket_id: str) -> Dict[str, Any]:
         """Join an existing game session"""
         if game_id not in self.games:
-            return False
+            return {"success": False, "reason": "Game not found"}
             
         game = self.games[game_id]
         
         # Check if game can accept new players
         if game.state != GameState.WAITING:
-            return False
+            return {"success": False, "reason": "Game is no longer accepting players"}
             
         # Create and add player
         player = Player(player_name, socket_id)
@@ -64,8 +65,20 @@ class GameManager:
         if success:
             self.player_to_game[socket_id] = game_id
             logging.info(f"Player {player_name} joined game {game_id}")
+            
+            # Check for auto-start if enabled
+            should_auto_start = False
+            if AUTO_START_ENABLED and len(game.players) >= REQUIRED_PLAYERS_FOR_AUTO_START:
+                should_auto_start = True
+            
+            return {
+                "success": True, 
+                "player_count": len(game.players),
+                "max_players": self.max_players,
+                "should_auto_start": should_auto_start
+            }
         
-        return success
+        return {"success": False, "reason": "Failed to join game"}
     
     def leave_game(self, socket_id: str) -> Optional[str]:
         """Remove a player from their current game"""
@@ -101,21 +114,22 @@ class GameManager:
         """Get the game ID that a player is currently in"""
         return self.player_to_game.get(socket_id)
     
-    def start_game(self, game_id: str, socket_id: str) -> Dict[str, Any]:
-        """Start a game (only host can start)"""
+    def start_game(self, game_id: str, socket_id: str = None) -> Dict[str, Any]:
+        """Start a game (host can start manually, or auto-start when socket_id is None)"""
         if game_id not in self.games:
             return {"success": False, "reason": "Game not found"}
             
         game = self.games[game_id]
         
-        # Check if player is host
-        if game.host_socket_id != socket_id:
+        # Check if player is host (skip check for auto-start)
+        if socket_id is not None and game.host_socket_id != socket_id:
             return {"success": False, "reason": "Only host can start game"}
         
         # Start the game
         result = game.start_game()
         if result["success"]:
-            logging.info(f"Game {game_id} started with {len(game.players)} players")
+            start_type = "auto-started" if socket_id is None else "started by host"
+            logging.info(f"Game {game_id} {start_type} with {len(game.players)} players")
         
         return result
     

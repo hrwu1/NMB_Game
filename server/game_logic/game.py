@@ -27,7 +27,7 @@ class Game:
     
     def __init__(self, game_id: str = None, max_players: int = MAX_PLAYERS):
         # Basic game info
-        self.game_id = game_id or str(uuid.uuid4())[:8]
+        self.game_id = game_id or str(uuid.uuid4())[:6].upper()
         self.created_at = datetime.now()
         self.last_updated = datetime.now()
         

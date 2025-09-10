@@ -90,22 +90,27 @@ function connectToServer() {
         document.getElementById('gameId').value = data.game_id;
         document.getElementById('startGameBtn').style.display = 'block';
         updateGameControls('host');
+        showLobbyStatus(data.game_id, 1, 4, true); // Show lobby with host as first player
     });
     
     socket.on('game_joined', function(data) {
         addLog(`Joined game: ${data.game_id}`, 'action');
         currentGameId = data.game_id;
         updateGameControls('player');
+        showLobbyStatus(data.game_id, data.player_count, data.max_players, false);
     });
     
     socket.on('player_joined', function(data) {
-        addLog(`${data.player_name} joined the game`, 'system');
+        addLog(data.message, 'system');
+        updateLobbyPlayerCount(data.player_count, data.max_players);
     });
     
     socket.on('game_started', function(data) {
-        addLog('Game started!', 'action');
+        const message = data.auto_started ? 'Game auto-started!' : 'Game started!';
+        addLog(message, 'action');
         gameState = data.game_state;
         document.getElementById('startGameBtn').style.display = 'none';
+        hideLobbyStatus(); // Hide lobby status when game starts
         updateGameDisplay();
         updateActionButtons();
     });
@@ -527,8 +532,28 @@ function startGame() {
         return;
     }
     
+    // Check if we have enough players (basic client-side check)
+    const playerCountDisplay = document.getElementById('player-count-display');
+    if (playerCountDisplay) {
+        const text = playerCountDisplay.textContent;
+        const playerCount = parseInt(text.split('/')[0]);
+        
+        if (playerCount < 2) {
+            addLog('Cannot start game: Need at least 2 players to start', 'warning');
+            showToast('Need at least 2 players to start the game', 'warning');
+            return;
+        }
+    }
+    
     socket.emit('start_game', { game_id: currentGameId });
     addLog('Starting game...', 'system');
+    
+    // Update lobby status to show starting state
+    const lobbyStatusText = document.getElementById('lobby-status-text');
+    if (lobbyStatusText) {
+        lobbyStatusText.textContent = 'Starting game...';
+        lobbyStatusText.className = 'status-starting';
+    }
 }
 
 function performAction(actionType) {
@@ -960,6 +985,89 @@ window.testConfigSimple = function() {
     
     xhr.send();
 };
+
+// Lobby Status Functions
+function showLobbyStatus(gameId, playerCount, maxPlayers, isHost) {
+    const lobbyStatus = document.getElementById('lobbyStatus');
+    const lobbyGameId = document.getElementById('lobby-game-id');
+    const playerCountDisplay = document.getElementById('player-count-display');
+    const lobbyStatusText = document.getElementById('lobby-status-text');
+    const requirementText = document.querySelector('.requirement-text');
+    
+    // Show the lobby status panel
+    lobbyStatus.style.display = 'block';
+    
+    // Update game ID
+    lobbyGameId.textContent = `Game ID: ${gameId}`;
+    
+    // Update player count
+    playerCountDisplay.textContent = `${playerCount}/${maxPlayers} players`;
+    
+    // Update status text
+    if (playerCount >= 2) {
+        lobbyStatusText.textContent = isHost ? 'Ready to start! Click "Start Game"' : 'Ready to start! Waiting for host...';
+        lobbyStatusText.className = 'status-ready';
+        requirementText.textContent = 'Game is ready to start!';
+    } else {
+        lobbyStatusText.textContent = 'Waiting for more players...';
+        lobbyStatusText.className = 'status-waiting';
+        requirementText.textContent = 'Need at least 2 players to start';
+    }
+    
+    // Update player list (for now, just show count - we'll enhance this later)
+    updatePlayerList(playerCount, isHost);
+}
+
+function updateLobbyPlayerCount(playerCount, maxPlayers) {
+    const playerCountDisplay = document.getElementById('player-count-display');
+    const lobbyStatusText = document.getElementById('lobby-status-text');
+    const requirementText = document.querySelector('.requirement-text');
+    
+    if (playerCountDisplay) {
+        playerCountDisplay.textContent = `${playerCount}/${maxPlayers} players`;
+    }
+    
+    if (lobbyStatusText) {
+        if (playerCount >= 2) {
+            lobbyStatusText.textContent = 'Ready to start!';
+            lobbyStatusText.className = 'status-ready';
+            requirementText.textContent = 'Game is ready to start!';
+        } else {
+            lobbyStatusText.textContent = 'Waiting for more players...';
+            lobbyStatusText.className = 'status-waiting';
+            requirementText.textContent = 'Need at least 2 players to start';
+        }
+    }
+    
+    // Update player list
+    updatePlayerList(playerCount, false);
+}
+
+function updatePlayerList(playerCount, isHost) {
+    const playerList = document.getElementById('player-list');
+    playerList.innerHTML = '';
+    
+    // For now, just show generic player entries
+    // In a full implementation, we'd get actual player names from the server
+    for (let i = 0; i < playerCount; i++) {
+        const li = document.createElement('li');
+        if (i === 0 && isHost) {
+            li.textContent = 'Player ' + (i + 1) + ' (You - Host)';
+            li.className = 'player-host';
+        } else if (i === 0 && !isHost) {
+            li.textContent = 'Player ' + (i + 1) + ' (Host)';
+            li.className = 'player-host';
+        } else {
+            li.textContent = 'Player ' + (i + 1);
+        }
+        playerList.appendChild(li);
+    }
+}
+
+function hideLobbyStatus() {
+    const lobbyStatus = document.getElementById('lobbyStatus');
+    lobbyStatus.style.display = 'none';
+}
 
 // Initialize the game when page loads
 window.addEventListener('load', function() {

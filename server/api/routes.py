@@ -166,30 +166,49 @@ def register_socket_handlers(socketio):
                 return
             
             # Join the game
-            success = game_manager.join_game(validated_game_id, validated_name, request.sid)
+            result = game_manager.join_game(validated_game_id, validated_name, request.sid)
             
-            if success:
+            if result["success"]:
                 # Join the game room
                 join_room(validated_game_id)
                 
                 # Notify all players in the game
                 socketio.emit('player_joined', {
                     'player_name': validated_name,
-                    'message': f'{validated_name} joined the game'
+                    'player_count': result["player_count"],
+                    'max_players': result["max_players"],
+                    'message': f'{validated_name} joined the game ({result["player_count"]}/{result["max_players"]} players)'
                 }, room=validated_game_id)
                 
                 # Send success response to joining player
                 emit('game_joined', {
                     'game_id': validated_game_id,
                     'player_name': validated_name,
+                    'player_count': result["player_count"],
+                    'max_players': result["max_players"],
                     'message': 'Successfully joined the game',
                     'success': True
                 })
                 
-                print(f"Player {validated_name} joined game {validated_game_id}")
+                print(f"Player {validated_name} joined game {validated_game_id} ({result['player_count']}/{result['max_players']} players)")
+                
+                # Auto-start if conditions are met
+                if result.get("should_auto_start", False):
+                    print(f"Auto-starting game {validated_game_id} with {result['player_count']} players")
+                    start_result = game_manager.start_game(validated_game_id, None)  # Auto-start doesn't require host permission
+                    
+                    if start_result["success"]:
+                        # Notify all players in the game that it started
+                        game_state = game_manager.get_game_state(validated_game_id)
+                        socketio.emit('game_started', {
+                            'game_id': validated_game_id,
+                            'message': 'Game auto-started with enough players!',
+                            'game_state': game_state,
+                            'auto_started': True
+                        }, room=validated_game_id)
                 
             else:
-                emit_error('Failed to join game. Game may be full or you may already be in it.', "JOIN_FAILED")
+                emit_error(result.get("reason", "Failed to join game"), "JOIN_FAILED")
                 
         except Exception as e:
             print(f"Error joining game: {e}")

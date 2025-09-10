@@ -11,9 +11,13 @@ from typing import Dict, List, Tuple
 # =============================================================================
 
 # Player limits
-MIN_PLAYERS = 1
+MIN_PLAYERS = 2
 MAX_PLAYERS = 4
 RECOMMENDED_PLAYERS = (2, 4)
+
+# Game start behavior
+AUTO_START_ENABLED = True  # Whether to auto-start when min players join
+REQUIRED_PLAYERS_FOR_AUTO_START = 2  # Number of players needed for auto-start
 
 # Board dimensions
 FLOOR_COUNT = 5
