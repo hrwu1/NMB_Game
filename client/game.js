@@ -90,27 +90,19 @@ function connectToServer() {
         document.getElementById('gameId').value = data.game_id;
         document.getElementById('startGameBtn').style.display = 'block';
         updateGameControls('host');
-        showLobbyStatus(data.game_id, 1, 4, true); // Show lobby with host as first player
+        showLobbyStatus(data.game_id, 1, 4, true, data.auto_start_enabled);
     });
     
     socket.on('game_joined', function(data) {
         addLog(`Joined game: ${data.game_id}`, 'action');
         currentGameId = data.game_id;
         updateGameControls('player');
-        showLobbyStatus(data.game_id, data.player_count, data.max_players, false);
+        showLobbyStatus(data.game_id, data.player_count, data.max_players, false, data.auto_start_enabled);
     });
     
     socket.on('player_joined', function(data) {
         addLog(data.message, 'system');
-        updateLobbyPlayerCount(data.player_count, data.max_players);
-        
-        // Hide start button if game auto-starts (indicated by message containing "auto-start")
-        if (data.message && data.message.toLowerCase().includes('auto-start')) {
-            const startBtn = document.getElementById('startGameBtn');
-            if (startBtn) {
-                startBtn.style.display = 'none';
-            }
-        }
+        updateLobbyPlayerCount(data.player_count, data.max_players, data.auto_start_enabled);
     });
     
     socket.on('game_started', function(data) {
@@ -1113,7 +1105,7 @@ window.testConfigSimple = function() {
 };
 
 // Lobby Status Functions
-function showLobbyStatus(gameId, playerCount, maxPlayers, isHost) {
+function showLobbyStatus(gameId, playerCount, maxPlayers, isHost, autoStartEnabled = true) {
     const lobbyStatus = document.getElementById('lobbyStatus');
     const lobbyGameId = document.getElementById('lobby-game-id');
     const playerCountDisplay = document.getElementById('player-count-display');
@@ -1129,16 +1121,36 @@ function showLobbyStatus(gameId, playerCount, maxPlayers, isHost) {
     // Update player count
     playerCountDisplay.textContent = `${playerCount}/${maxPlayers} players`;
     
-    // Update status text (auto-start happens at 2+ players)
+    // Update status text based on auto-start setting
     if (playerCount >= 2) {
-        lobbyStatusText.textContent = 'Auto-starting game...';
-        lobbyStatusText.className = 'status-starting';
-        requirementText.textContent = 'Game will start automatically!';
-        
-        // Hide the start button since auto-start will happen
-        const startBtn = document.getElementById('startGameBtn');
-        if (startBtn) {
-            startBtn.style.display = 'none';
+        if (autoStartEnabled) {
+            // Auto-start is enabled
+            lobbyStatusText.textContent = 'Auto-starting game...';
+            lobbyStatusText.className = 'status-starting';
+            requirementText.textContent = 'Game will start automatically!';
+            
+            // Hide the start button since auto-start will happen
+            const startBtn = document.getElementById('startGameBtn');
+            if (startBtn) {
+                startBtn.style.display = 'none';
+            }
+        } else {
+            // Manual start mode
+            if (isHost) {
+                lobbyStatusText.textContent = 'Ready to start! Click "Start Game"';
+                lobbyStatusText.className = 'status-ready';
+                requirementText.textContent = 'Game is ready to start!';
+                
+                // Show the start button for the host
+                const startBtn = document.getElementById('startGameBtn');
+                if (startBtn) {
+                    startBtn.style.display = 'block';
+                }
+            } else {
+                lobbyStatusText.textContent = 'Ready to start! Waiting for host...';
+                lobbyStatusText.className = 'status-ready';
+                requirementText.textContent = 'Waiting for host to start the game';
+            }
         }
     } else {
         lobbyStatusText.textContent = 'Waiting for more players...';
@@ -1150,7 +1162,7 @@ function showLobbyStatus(gameId, playerCount, maxPlayers, isHost) {
     updatePlayerList(playerCount, isHost);
 }
 
-function updateLobbyPlayerCount(playerCount, maxPlayers) {
+function updateLobbyPlayerCount(playerCount, maxPlayers, autoStartEnabled = true) {
     const playerCountDisplay = document.getElementById('player-count-display');
     const lobbyStatusText = document.getElementById('lobby-status-text');
     const requirementText = document.querySelector('.requirement-text');
@@ -1161,14 +1173,33 @@ function updateLobbyPlayerCount(playerCount, maxPlayers) {
     
     if (lobbyStatusText) {
         if (playerCount >= 2) {
-            lobbyStatusText.textContent = 'Auto-starting game...';
-            lobbyStatusText.className = 'status-starting';
-            requirementText.textContent = 'Game will start automatically!';
-            
-            // Hide the start button since auto-start will happen
-            const startBtn = document.getElementById('startGameBtn');
-            if (startBtn) {
-                startBtn.style.display = 'none';
+            if (autoStartEnabled) {
+                // Auto-start is enabled
+                lobbyStatusText.textContent = 'Auto-starting game...';
+                lobbyStatusText.className = 'status-starting';
+                requirementText.textContent = 'Game will start automatically!';
+                
+                // Hide the start button since auto-start will happen
+                const startBtn = document.getElementById('startGameBtn');
+                if (startBtn) {
+                    startBtn.style.display = 'none';
+                }
+            } else {
+                // Manual start mode - determine if user is host
+                // We'll assume host status is maintained from the initial lobby setup
+                const startBtn = document.getElementById('startGameBtn');
+                const isHost = startBtn && startBtn.style.display !== 'none';
+                
+                if (isHost) {
+                    lobbyStatusText.textContent = 'Ready to start! Click "Start Game"';
+                    lobbyStatusText.className = 'status-ready';
+                    requirementText.textContent = 'Game is ready to start!';
+                    startBtn.style.display = 'block';
+                } else {
+                    lobbyStatusText.textContent = 'Ready to start! Waiting for host...';
+                    lobbyStatusText.className = 'status-ready';
+                    requirementText.textContent = 'Waiting for host to start the game';
+                }
             }
         } else {
             lobbyStatusText.textContent = 'Waiting for more players...';

@@ -75,7 +75,8 @@ class GameManager:
                 "success": True, 
                 "player_count": len(game.players),
                 "max_players": self.max_players,
-                "should_auto_start": should_auto_start
+                "should_auto_start": should_auto_start,
+                "auto_start_enabled": AUTO_START_ENABLED
             }
         
         return {"success": False, "reason": "Failed to join game"}
@@ -186,3 +187,7 @@ class GameManager:
     def get_game(self, game_id: str) -> Optional[Game]:
         """Get game instance by ID"""
         return self.games.get(game_id)
+    
+    def get_auto_start_config(self) -> bool:
+        """Get the current auto-start configuration"""
+        return AUTO_START_ENABLED

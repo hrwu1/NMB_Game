@@ -16,7 +16,7 @@ MAX_PLAYERS = 4
 RECOMMENDED_PLAYERS = (2, 4)
 
 # Game start behavior
-AUTO_START_ENABLED = True  # Whether to auto-start when min players join
+AUTO_START_ENABLED = False  # Whether to auto-start when min players join
 REQUIRED_PLAYERS_FOR_AUTO_START = 2  # Number of players needed for auto-start
 
 # Board dimensions

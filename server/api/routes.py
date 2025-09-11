@@ -125,6 +125,7 @@ def register_socket_handlers(socketio):
                 'game_id': game_id,
                 'player_name': validated_name,
                 'message': f'Game {game_id} created successfully',
+                'auto_start_enabled': game_manager.get_auto_start_config(),
                 'success': True
             })
             
@@ -177,6 +178,7 @@ def register_socket_handlers(socketio):
                     'player_name': validated_name,
                     'player_count': result["player_count"],
                     'max_players': result["max_players"],
+                    'auto_start_enabled': result.get("auto_start_enabled", False),
                     'message': f'{validated_name} joined the game ({result["player_count"]}/{result["max_players"]} players)'
                 }, room=validated_game_id)
                 
@@ -186,6 +188,7 @@ def register_socket_handlers(socketio):
                     'player_name': validated_name,
                     'player_count': result["player_count"],
                     'max_players': result["max_players"],
+                    'auto_start_enabled': result.get("auto_start_enabled", False),
                     'message': 'Successfully joined the game',
                     'success': True
                 })
