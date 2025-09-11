@@ -1311,20 +1311,14 @@ function showDiceRoll(diceType, purpose, result, playerData = null) {
     // Show the container
     container.classList.add('active');
     
-    // Start the dice rolling animation
-    dice.classList.add('rolling');
-    
-    // After animation completes, show the result
-    setTimeout(() => {
-        dice.classList.remove('rolling');
-        
+    // Start a JS-driven tumbling animation for multi-face visibility
+    startDiceTumble(dice, 1800, () => {
         // Update the front face to show the final result
         setDiceFinalResult(dice, diceType, result);
         
-        // Position dice to show the front face with result to the user
-        // Rotate to show front face clearly
-        dice.style.transform = 'rotateX(0deg) rotateY(0deg) rotateZ(0deg)';
+        // Position dice to show the front face with result clearly
         dice.style.transition = 'transform 0.8s ease-out';
+        dice.style.transform = 'rotateX(0deg) rotateY(0deg) rotateZ(0deg)';
         
         // Show the result number in the display
         resultValue.textContent = result;
@@ -1332,30 +1326,22 @@ function showDiceRoll(diceType, purpose, result, playerData = null) {
         // Add a gentle settle bounce
         setTimeout(() => {
             dice.style.animation = 'diceSettle 0.6s ease-out';
-            
-            setTimeout(() => {
-                dice.style.animation = '';
-            }, 600);
+            setTimeout(() => { dice.style.animation = ''; }, 600);
         }, 300);
         
         // Special handling for player order determination
         if (purpose === 'player_order' && playerData) {
-            setTimeout(() => {
-                showPlayerOrderResults(playerData);
-            }, 1200);
+            setTimeout(() => { showPlayerOrderResults(playerData); }, 1200);
         } else {
             // For regular rolls, show close button after a moment
-            setTimeout(() => {
-                closeBtn.style.display = 'block';
-            }, 1500);
+            setTimeout(() => { closeBtn.style.display = 'block'; }, 1500);
         }
         
         // Update in-game dice panel for movement rolls
         if (purpose === 'movement') {
             updateInGameDiceDisplay(result);
         }
-        
-    }, 2500); // Match the animation duration
+    });
 }
 
 function createDiceElement(diceType, finalResult) {
@@ -1363,28 +1349,40 @@ function createDiceElement(diceType, finalResult) {
     dice.className = `dice ${diceType}`;
     dice.dataset.finalResult = finalResult; // Store final result for later
     
-    // Create 6 faces for cube
-    const faces = ['front', 'back', 'right', 'left', 'top', 'bottom'];
-    const faceValues = generateDiceFaceValues(diceType, finalResult);
-    
-    faces.forEach((faceClass, index) => {
-        const face = document.createElement('div');
-        face.className = `dice-face ${faceClass}`;
-        face.dataset.faceValue = faceValues[faceClass];
-        
-        // Initially show random values (not the final result)
-        const displayValue = faceValues[faceClass];
-        
-        if (diceType === 'd6' && displayValue <= 6) {
-            // For D6, show dots
-            face.innerHTML = createDiceDots(displayValue);
-        } else {
-            // For D12 or numbers > 6, show the number
-            face.textContent = displayValue;
+    if (diceType === 'd12') {
+        const faceValues = generateDiceFaceValues(diceType, finalResult);
+        for (let i = 0; i < 12; i++) {
+            const face = document.createElement('div');
+            // Add d12-face for pentagon shape and face-i for positioning
+            face.className = `dice-face d12-face face-${i}`;
+            face.dataset.faceValue = faceValues[i];
+            face.textContent = faceValues[i];
+            dice.appendChild(face);
         }
+    } else { // d6
+        // Create 6 faces for cube
+        const faces = ['front', 'back', 'right', 'left', 'top', 'bottom'];
+        const faceValues = generateDiceFaceValues(diceType, finalResult);
         
-        dice.appendChild(face);
-    });
+        faces.forEach((faceClass, index) => {
+            const face = document.createElement('div');
+            face.className = `dice-face ${faceClass}`;
+            face.dataset.faceValue = faceValues[faceClass];
+            
+            // Initially show random values (not the final result)
+            const displayValue = faceValues[faceClass];
+            
+            if (diceType === 'd6' && displayValue <= 6) {
+                // For D6, show dots
+                face.innerHTML = createDiceDots(displayValue);
+            } else {
+                // For numbers > 6 on a d6 (if that ever happens), show number
+                face.textContent = displayValue;
+            }
+            
+            dice.appendChild(face);
+        });
+    }
     
     return dice;
 }
@@ -1392,6 +1390,26 @@ function createDiceElement(diceType, finalResult) {
 function generateDiceFaceValues(diceType, finalResult) {
     const maxValue = diceType === 'd6' ? 6 : 12;
     
+    if (diceType === 'd12') {
+        const allValues = Array.from({length: 12}, (_, i) => i + 1);
+        
+        // Shuffle values to get random faces
+        for (let i = allValues.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [allValues[i], allValues[j]] = [allValues[j], allValues[i]];
+        }
+        
+        // Ensure finalResult is not on the front face (index 0) initially.
+        // It will be set after the tumble animation.
+        const resultIndex = allValues.indexOf(finalResult);
+        if (resultIndex === 0) {
+            // Swap with the last element
+            [allValues[0], allValues[11]] = [allValues[11], allValues[0]];
+        }
+        return allValues;
+    }
+
+    // d6 logic below
     // Generate random values for all faces - none show the final result initially
     const availableValues = [];
     for (let i = 1; i <= maxValue; i++) {
@@ -1421,15 +1439,68 @@ function generateDiceFaceValues(diceType, finalResult) {
 
 function setDiceFinalResult(dice, diceType, finalResult) {
     // This function is called after rolling to show the final result
-    const frontFace = dice.querySelector('.dice-face.front');
-    
-    if (diceType === 'd6' && finalResult <= 6) {
-        frontFace.innerHTML = createDiceDots(finalResult);
-    } else {
-        frontFace.textContent = finalResult;
+    if (diceType === 'd12') {
+        const frontFace = dice.querySelector('.d12-face.face-0');
+        if(frontFace) {
+            frontFace.textContent = finalResult;
+            frontFace.dataset.faceValue = finalResult;
+        }
+    } else { // d6
+        const frontFace = dice.querySelector('.dice-face.front');
+        
+        if (diceType === 'd6' && finalResult <= 6) {
+            frontFace.innerHTML = createDiceDots(finalResult);
+        } else {
+            frontFace.textContent = finalResult;
+        }
+        
+        frontFace.dataset.faceValue = finalResult;
     }
+}
+
+// Use requestAnimationFrame tumbling to ensure many faces are visible while rolling
+function startDiceTumble(dice, durationMs = 1800, onComplete = () => {}) {
+    const start = performance.now();
+    let last = start;
+    // Random initial angular velocities (deg/s)
+    let vx = 720 + Math.random() * 720;   // 2-4 spins/sec
+    let vy = 720 + Math.random() * 720;
+    let vz = 360 + Math.random() * 540;
+    // Add slight random wobble
+    const wobbleX = 60 + Math.random() * 60;
+    const wobbleY = 60 + Math.random() * 60;
+    const wobbleZ = 30 + Math.random() * 60;
+    // Damping towards the end
+    const dampingStart = durationMs * 0.6;
     
-    frontFace.dataset.faceValue = finalResult;
+    function frame(now) {
+        const elapsed = now - start;
+        const dt = (now - last) / 1000;
+        last = now;
+        
+        // Apply damping after a while to reduce speed smoothly
+        if (elapsed > dampingStart) {
+            const t = (elapsed - dampingStart) / (durationMs - dampingStart);
+            const factor = Math.max(0.05, 1 - t); // down to 5%
+            vx *= 1 - (1 - factor) * dt;
+            vy *= 1 - (1 - factor) * dt;
+            vz *= 1 - (1 - factor) * dt;
+        }
+        
+        // Current angles from integrating angular velocity
+        const ax = (vx * (elapsed / 1000)) + Math.sin(elapsed / 120) * wobbleX;
+        const ay = (vy * (elapsed / 1000)) + Math.cos(elapsed / 140) * wobbleY;
+        const az = (vz * (elapsed / 1000)) + Math.sin(elapsed / 200) * wobbleZ;
+        
+        dice.style.transform = `rotateX(${ax}deg) rotateY(${ay}deg) rotateZ(${az}deg)`;
+        
+        if (elapsed < durationMs) {
+            requestAnimationFrame(frame);
+        } else {
+            onComplete();
+        }
+    }
+    requestAnimationFrame(frame);
 }
 
 function createDiceDots(number) {
