@@ -13,6 +13,48 @@ from .player import Player
 from .board import Board, Position, TilePosition, PathTile
 from .cards import *
 
+def _can_place_tile_from_position(player_sub_x: int, player_sub_y: int, 
+                                  current_tile_pos: 'TilePosition', 
+                                  target_tile_pos: 'TilePosition') -> Tuple[bool, str]:
+    """Check if player can place a tile from their current sub-position"""
+    
+    # First check if player is on the outer edge of their tile (one of 12 positions)
+    is_on_edge = (player_sub_x == 0 or player_sub_x == 3 or 
+                  player_sub_y == 0 or player_sub_y == 3)
+    
+    if not is_on_edge:
+        return False, "Must be standing on the outer edge of your tile to explore"
+    
+    # Calculate tile direction from current to target
+    tile_dx = target_tile_pos.x - current_tile_pos.x
+    tile_dy = target_tile_pos.y - current_tile_pos.y
+    
+    # Must be exactly one tile away in cardinal direction
+    if not ((abs(tile_dx) == 1 and tile_dy == 0) or (tile_dx == 0 and abs(tile_dy) == 1)):
+        return False, "Target tile must be exactly one tile away"
+    
+    # Check if player's sub-position allows placement in this direction
+    can_place = False
+    direction = ""
+    
+    if tile_dx == 1 and tile_dy == 0:  # Placing East
+        direction = "East"
+        can_place = player_sub_x == 3  # Must be on right edge
+    elif tile_dx == -1 and tile_dy == 0:  # Placing West  
+        direction = "West"
+        can_place = player_sub_x == 0  # Must be on left edge
+    elif tile_dx == 0 and tile_dy == 1:  # Placing South
+        direction = "South"
+        can_place = player_sub_y == 3  # Must be on bottom edge
+    elif tile_dx == 0 and tile_dy == -1:  # Placing North
+        direction = "North" 
+        can_place = player_sub_y == 0  # Must be on top edge
+    
+    if not can_place:
+        return False, f"Cannot place tile {direction} from your current position. Move to the {direction.lower()} edge of your tile."
+    
+    return True, ""
+
 def validate_action(game, socket_id: str, action_type: str) -> Tuple[bool, str]:
     """Validate if a player can perform an action"""
     if socket_id not in game.players:
@@ -146,36 +188,56 @@ def action_explore(game, socket_id: str, explore_data: Dict[str, Any]) -> Dict[s
     placement_position = explore_data.get("placement_position")
     print(f"[DEBUG] Player: {player.name}, placement_position: {placement_position}")
     
-    # If no placement position specified, find the best adjacent position automatically
+    # If no placement position specified, automatically find valid position based on player's sub-position
     if not placement_position:
-        # Get player's current tile position
+        # Get player's current tile position and sub-position
         current_tile_pos = TilePosition(
             x=player.position.tile_x,
             y=player.position.tile_y, 
             floor=player.position.floor
         )
+        player_sub_x = player.position.sub_x
+        player_sub_y = player.position.sub_y
         
-        # Try adjacent positions in order: East, West, South, North
-        adjacent_offsets = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-        place_pos = None
+        # Determine valid placement directions based on player's sub-position
+        valid_directions = []
         
-        for dx, dy in adjacent_offsets:
-            test_x = current_tile_pos.x + dx
-            test_y = current_tile_pos.y + dy
-            
-            # Check bounds
-            if 0 <= test_x < BOARD_SIZE[0] and 0 <= test_y < BOARD_SIZE[1]:
-                test_pos = TilePosition(test_x, test_y, current_tile_pos.floor)
+        # Check each cardinal direction
+        directions = [
+            (1, 0, "East", 3, None),    # East: must be on right edge (sub_x == 3)
+            (-1, 0, "West", 0, None),   # West: must be on left edge (sub_x == 0)  
+            (0, 1, "South", None, 3),   # South: must be on bottom edge (sub_y == 3)
+            (0, -1, "North", None, 0)   # North: must be on top edge (sub_y == 0)
+        ]
+        
+        for dx, dy, name, req_sub_x, req_sub_y in directions:
+            # Check if player's sub-position allows this direction
+            can_place_direction = True
+            if req_sub_x is not None and player_sub_x != req_sub_x:
+                can_place_direction = False
+            if req_sub_y is not None and player_sub_y != req_sub_y:
+                can_place_direction = False
                 
-                # Check if position is not occupied
-                if not game.board.get_tile_at_tile_pos(test_pos):
-                    place_pos = test_pos
-                    break
+            if can_place_direction:
+                test_x = current_tile_pos.x + dx
+                test_y = current_tile_pos.y + dy
+                
+                # Check bounds
+                if 0 <= test_x < BOARD_SIZE[0] and 0 <= test_y < BOARD_SIZE[1]:
+                    test_pos = TilePosition(test_x, test_y, current_tile_pos.floor)
+                    
+                    # Check if position is not occupied
+                    if not game.board.get_tile_at_tile_pos(test_pos):
+                        valid_directions.append((test_pos, name))
         
-        if not place_pos:
-            return {"success": False, "reason": "No adjacent positions available for tile placement"}
+        if not valid_directions:
+            return {"success": False, "reason": "Cannot explore from your current position. Move to the outer edge of your tile in the direction you want to place a tile."}
+        
+        # Use the first valid direction found
+        place_pos, direction_name = valid_directions[0]
+        print(f"[DEBUG] Auto-placement: Player at sub-pos ({player_sub_x},{player_sub_y}) can place tile {direction_name} at tile ({place_pos.x},{place_pos.y})")
     else:
-        # Handle legacy frontend that still sends placement_position
+        # Handle frontend that specifies placement_position
         try:
             # For tile placement, we use tile coordinates (not sub-positions)
             if "tile_x" in placement_position:
@@ -193,8 +255,29 @@ def action_explore(game, socket_id: str, explore_data: Dict[str, Any]) -> Dict[s
                 place_pos = TilePosition(tile_x, tile_y, placement_position["floor"])
         except (ValueError, KeyError) as e:
             return {"success": False, "reason": f"Invalid placement position: {str(e)}"}
+        
+        # Validate using strict sub-position adjacency rules
+        current_tile_pos = TilePosition(
+            x=player.position.tile_x,
+            y=player.position.tile_y, 
+            floor=player.position.floor
+        )
+        
+        # Use the helper function to check if placement is valid from current sub-position
+        can_place, reason = _can_place_tile_from_position(
+            player.position.sub_x, 
+            player.position.sub_y, 
+            current_tile_pos, 
+            place_pos
+        )
+        
+        if not can_place:
+            print(f"[DEBUG] Manual placement validation failed: Player at sub-pos ({player.position.sub_x},{player.position.sub_y}) cannot place tile at ({place_pos.x},{place_pos.y}): {reason}")
+            return {"success": False, "reason": reason}
+        
+        print(f"[DEBUG] Manual placement validated: Player at sub-pos ({player.position.sub_x},{player.position.sub_y}) can place tile at ({place_pos.x},{place_pos.y})")
     
-    # Draw path tile from deck
+    # Draw path tile from deck (only after all position validation passes)
     path_card = game.decks[CardType.PATH_TILE].draw()
     if not path_card:
         return {"success": False, "reason": "No path tiles remaining"}
