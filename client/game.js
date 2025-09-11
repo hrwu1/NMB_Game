@@ -1317,18 +1317,31 @@ function showDiceRoll(diceType, purpose, result, playerData = null) {
     // After animation completes, show the result
     setTimeout(() => {
         dice.classList.remove('rolling');
+        
+        // Position dice to show the front face with result
+        dice.style.transform = 'rotateX(0deg) rotateY(0deg) rotateZ(0deg)';
+        
+        // Add a gentle settle animation
+        dice.style.animation = 'diceSettle 0.5s ease-out';
+        
+        // Show the result number
         resultValue.textContent = result;
+        
+        // Clean up the settle animation
+        setTimeout(() => {
+            dice.style.animation = '';
+        }, 500);
         
         // Special handling for player order determination
         if (purpose === 'player_order' && playerData) {
             setTimeout(() => {
                 showPlayerOrderResults(playerData);
-            }, 1000);
+            }, 800);
         } else {
             // For regular rolls, show close button after a moment
             setTimeout(() => {
                 closeBtn.style.display = 'block';
-            }, 1500);
+            }, 1200);
         }
         
         // Update in-game dice panel for movement rolls
@@ -1336,43 +1349,62 @@ function showDiceRoll(diceType, purpose, result, playerData = null) {
             updateInGameDiceDisplay(result);
         }
         
-    }, 2000); // Match the animation duration
+    }, 2500); // Match the animation duration
 }
 
 function createDiceElement(diceType, finalResult) {
     const dice = document.createElement('div');
     dice.className = `dice ${diceType}`;
     
-    // Create 6 faces (simplified for both d6 and d12)
+    // Create 6 faces for cube
     const faces = ['front', 'back', 'right', 'left', 'top', 'bottom'];
+    const faceValues = generateDiceFaceValues(diceType, finalResult);
     
     faces.forEach((faceClass, index) => {
         const face = document.createElement('div');
         face.className = `dice-face ${faceClass}`;
         
-        if (diceType === 'd6') {
-            // For D6, show dots or numbers
-            if (faceClass === 'front') {
-                // The front face will show the final result
-                face.innerHTML = createDiceDots(finalResult);
-            } else {
-                // Other faces show random numbers
-                const randomNum = Math.floor(Math.random() * 6) + 1;
-                face.innerHTML = createDiceDots(randomNum);
-            }
+        const faceValue = faceValues[faceClass];
+        
+        if (diceType === 'd6' && faceValue <= 6) {
+            // For D6, show dots
+            face.innerHTML = createDiceDots(faceValue);
         } else {
-            // For D12, just show numbers
-            if (faceClass === 'front') {
-                face.textContent = finalResult;
-            } else {
-                face.textContent = Math.floor(Math.random() * 12) + 1;
-            }
+            // For D12 or numbers > 6, show the number
+            face.textContent = faceValue;
         }
         
         dice.appendChild(face);
     });
     
     return dice;
+}
+
+function generateDiceFaceValues(diceType, finalResult) {
+    const maxValue = diceType === 'd6' ? 6 : 12;
+    
+    // Generate random values for all faces except front
+    const values = {
+        front: finalResult,
+        back: Math.floor(Math.random() * maxValue) + 1,
+        right: Math.floor(Math.random() * maxValue) + 1,
+        left: Math.floor(Math.random() * maxValue) + 1,
+        top: Math.floor(Math.random() * maxValue) + 1,
+        bottom: Math.floor(Math.random() * maxValue) + 1
+    };
+    
+    // Make sure we don't have duplicates of the final result on visible faces
+    Object.keys(values).forEach(face => {
+        if (face !== 'front' && values[face] === finalResult) {
+            let newValue;
+            do {
+                newValue = Math.floor(Math.random() * maxValue) + 1;
+            } while (newValue === finalResult);
+            values[face] = newValue;
+        }
+    });
+    
+    return values;
 }
 
 function createDiceDots(number) {
@@ -1394,13 +1426,19 @@ function createDiceDots(number) {
     
     // Create 9 positions (3x3 grid)
     for (let i = 0; i < 9; i++) {
-        const dotSlot = document.createElement('div');
+        const gridCell = document.createElement('div');
+        gridCell.style.gridColumn = (i % 3) + 1;
+        gridCell.style.gridRow = Math.floor(i / 3) + 1;
+        gridCell.style.display = 'flex';
+        gridCell.style.alignItems = 'center';
+        gridCell.style.justifyContent = 'center';
+        
         if (dotPositions[number].includes(i)) {
             const dot = document.createElement('div');
             dot.className = 'dice-dot';
-            dotSlot.appendChild(dot);
+            gridCell.appendChild(dot);
         }
-        dotsContainer.appendChild(dotSlot);
+        dotsContainer.appendChild(gridCell);
     }
     
     return dotsContainer.outerHTML;
