@@ -150,6 +150,40 @@
             </div>
         </div>
     </div>
+    
+    <!-- Dice Animation Container -->
+    <div id="dice-container" class="dice-container">
+        <div class="dice-backdrop"></div>
+        <div class="dice-rolling-area">
+            <div id="dice-display">
+                <!-- Dice will be dynamically added here -->
+            </div>
+            <div class="dice-result-display">
+                <div id="dice-result-title" class="dice-result-title">Rolling...</div>
+                <div id="dice-result-value" class="dice-result-value">?</div>
+                <div id="player-order-display" class="player-order-display" style="display: none;">
+                    <div class="player-order-title">🎯 Turn Order Determined!</div>
+                    <ul id="player-order-list" class="player-order-list">
+                        <!-- Player order items will be added dynamically -->
+                    </ul>
+                </div>
+                <button id="dice-close-btn" class="dice-close-btn" onclick="closeDiceDisplay()" style="display: none;">
+                    Continue
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dice Display Panel (for in-game current roll display) -->
+    <div id="in-game-dice-panel" class="dice-display-panel" style="display: none; position: fixed; top: 20px; right: 20px; z-index: 999;">
+        <h4 style="margin: 0 0 10px 0; color: #4fd1c7;">🎲 Current Roll</h4>
+        <div class="current-dice-roll">
+            <div id="current-mini-dice" class="mini-dice">?</div>
+            <span class="dice-roll-text">Movement:</span>
+            <span id="current-roll-value" class="dice-roll-value">0</span>
+        </div>
+    </div>
+
     <script src="game.js"></script>
 </body>
 </html>

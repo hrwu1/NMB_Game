@@ -11,7 +11,7 @@ import re
 import time
 from .game_manager import GameManager
 
-# Initialize game manager
+# Initialize game manager (will be set up with socketio in register_socket_handlers)
 game_manager = GameManager()
 
 # Input validation functions
@@ -57,6 +57,9 @@ def emit_error(message, error_code=None):
 
 def register_socket_handlers(socketio):
     """Register all SocketIO event handlers"""
+    
+    # Set up the socketio instance on the game manager
+    game_manager.socketio = socketio
     
     @socketio.on('connect')
     def handle_connect():

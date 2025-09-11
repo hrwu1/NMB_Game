@@ -141,6 +141,37 @@ function connectToServer() {
         updateActionButtons();
     });
     
+    // Enhanced dice roll event handler
+    socket.on('dice_roll', function(data) {
+        console.log('🎲 Dice roll event received:', data);
+        
+        if (data.purpose === 'player_order' && data.all_player_rolls) {
+            // This is a player order determination roll
+            showDiceRoll('d12', 'player_order', data.result, data.all_player_rolls);
+            addLog(`🎯 Turn order determined! ${Object.values(data.all_player_rolls).map(p => `${p.name}(${p.roll})`).join(', ')}`, 'action');
+        } else if (data.purpose === 'movement') {
+            // This is a movement roll
+            showDiceRoll('d6', 'movement', data.result);
+            addLog(`🚶 ${data.player_name} rolled ${data.result} for movement`, 'action');
+        } else {
+            // Generic dice roll
+            showDiceRoll(data.dice_type || 'd6', data.purpose || 'generic', data.result);
+            addLog(`🎲 ${data.player_name || 'Someone'} rolled ${data.result}`, 'action');
+        }
+    });
+    
+    // Enhanced turn start event
+    socket.on('turn_started', function(data) {
+        addLog(`🎯 ${data.player_name}'s turn started`, 'action');
+        
+        if (data.movement_roll && data.player_id === socket.id) {
+            // This player just started their turn and got a movement roll
+            setTimeout(() => {
+                showDiceRoll('d6', 'movement', data.movement_roll);
+            }, 500); // Small delay to let other UI updates complete
+        }
+    });
+    
     socket.on('action_result', function(data) {
         if (data.success) {
             addLog(`Action successful: ${data.message || 'Action completed'}`, 'action');
@@ -1237,6 +1268,238 @@ function hideLobbyStatus() {
     const lobbyStatus = document.getElementById('lobbyStatus');
     lobbyStatus.style.display = 'none';
 }
+
+// =============================================================================
+// DICE ANIMATION SYSTEM
+// =============================================================================
+
+function showDiceRoll(diceType, purpose, result, playerData = null) {
+    const container = document.getElementById('dice-container');
+    const diceDisplay = document.getElementById('dice-display');
+    const resultTitle = document.getElementById('dice-result-title');
+    const resultValue = document.getElementById('dice-result-value');
+    const closeBtn = document.getElementById('dice-close-btn');
+    const playerOrderDisplay = document.getElementById('player-order-display');
+    
+    // Clear previous dice
+    diceDisplay.innerHTML = '';
+    
+    // Create the dice element
+    const dice = createDiceElement(diceType, result);
+    diceDisplay.appendChild(dice);
+    
+    // Set up title based on purpose
+    let title = '';
+    switch (purpose) {
+        case 'player_order':
+            title = '🎯 Rolling for Turn Order';
+            break;
+        case 'movement':
+            title = '🚶 Movement Roll';
+            break;
+        default:
+            title = '🎲 Rolling Dice';
+    }
+    
+    resultTitle.textContent = title;
+    resultValue.textContent = '?';
+    
+    // Hide player order display and close button initially
+    playerOrderDisplay.style.display = 'none';
+    closeBtn.style.display = 'none';
+    
+    // Show the container
+    container.classList.add('active');
+    
+    // Start the dice rolling animation
+    dice.classList.add('rolling');
+    
+    // After animation completes, show the result
+    setTimeout(() => {
+        dice.classList.remove('rolling');
+        resultValue.textContent = result;
+        
+        // Special handling for player order determination
+        if (purpose === 'player_order' && playerData) {
+            setTimeout(() => {
+                showPlayerOrderResults(playerData);
+            }, 1000);
+        } else {
+            // For regular rolls, show close button after a moment
+            setTimeout(() => {
+                closeBtn.style.display = 'block';
+            }, 1500);
+        }
+        
+        // Update in-game dice panel for movement rolls
+        if (purpose === 'movement') {
+            updateInGameDiceDisplay(result);
+        }
+        
+    }, 2000); // Match the animation duration
+}
+
+function createDiceElement(diceType, finalResult) {
+    const dice = document.createElement('div');
+    dice.className = `dice ${diceType}`;
+    
+    // Create 6 faces (simplified for both d6 and d12)
+    const faces = ['front', 'back', 'right', 'left', 'top', 'bottom'];
+    
+    faces.forEach((faceClass, index) => {
+        const face = document.createElement('div');
+        face.className = `dice-face ${faceClass}`;
+        
+        if (diceType === 'd6') {
+            // For D6, show dots or numbers
+            if (faceClass === 'front') {
+                // The front face will show the final result
+                face.innerHTML = createDiceDots(finalResult);
+            } else {
+                // Other faces show random numbers
+                const randomNum = Math.floor(Math.random() * 6) + 1;
+                face.innerHTML = createDiceDots(randomNum);
+            }
+        } else {
+            // For D12, just show numbers
+            if (faceClass === 'front') {
+                face.textContent = finalResult;
+            } else {
+                face.textContent = Math.floor(Math.random() * 12) + 1;
+            }
+        }
+        
+        dice.appendChild(face);
+    });
+    
+    return dice;
+}
+
+function createDiceDots(number) {
+    if (number < 1 || number > 6) {
+        return number.toString();
+    }
+    
+    const dotsContainer = document.createElement('div');
+    dotsContainer.className = 'dice-dots';
+    
+    const dotPositions = {
+        1: [4], // center
+        2: [0, 8], // opposite corners
+        3: [0, 4, 8], // diagonal
+        4: [0, 2, 6, 8], // four corners
+        5: [0, 2, 4, 6, 8], // four corners + center
+        6: [0, 2, 3, 5, 6, 8] // two columns
+    };
+    
+    // Create 9 positions (3x3 grid)
+    for (let i = 0; i < 9; i++) {
+        const dotSlot = document.createElement('div');
+        if (dotPositions[number].includes(i)) {
+            const dot = document.createElement('div');
+            dot.className = 'dice-dot';
+            dotSlot.appendChild(dot);
+        }
+        dotsContainer.appendChild(dotSlot);
+    }
+    
+    return dotsContainer.outerHTML;
+}
+
+function showPlayerOrderResults(playerOrderData) {
+    const playerOrderDisplay = document.getElementById('player-order-display');
+    const playerOrderList = document.getElementById('player-order-list');
+    const closeBtn = document.getElementById('dice-close-btn');
+    
+    // Clear previous results
+    playerOrderList.innerHTML = '';
+    
+    // Sort players by their rolls (highest first)
+    const sortedPlayers = Object.entries(playerOrderData)
+        .sort((a, b) => b[1].roll - a[1].roll);
+    
+    // Create the ordered list
+    sortedPlayers.forEach(([socketId, playerInfo], index) => {
+        const listItem = document.createElement('li');
+        listItem.className = 'player-order-item';
+        
+        const rank = document.createElement('span');
+        rank.className = 'player-order-rank';
+        rank.textContent = `#${index + 1}`;
+        
+        const name = document.createElement('span');
+        name.className = 'player-order-name';
+        name.textContent = playerInfo.name;
+        
+        const roll = document.createElement('span');
+        roll.className = 'player-order-roll';
+        roll.textContent = playerInfo.roll;
+        
+        listItem.appendChild(rank);
+        listItem.appendChild(name);
+        listItem.appendChild(roll);
+        
+        playerOrderList.appendChild(listItem);
+    });
+    
+    // Show the player order display
+    playerOrderDisplay.style.display = 'block';
+    
+    // Show close button
+    setTimeout(() => {
+        closeBtn.style.display = 'block';
+    }, 1000);
+}
+
+function updateInGameDiceDisplay(rollValue) {
+    const panel = document.getElementById('in-game-dice-panel');
+    const miniDice = document.getElementById('current-mini-dice');
+    const rollValueSpan = document.getElementById('current-roll-value');
+    
+    // Update the values
+    miniDice.textContent = rollValue;
+    rollValueSpan.textContent = rollValue;
+    
+    // Show the panel
+    panel.style.display = 'block';
+    
+    // Auto-hide after 5 seconds
+    setTimeout(() => {
+        panel.style.display = 'none';
+    }, 5000);
+}
+
+function closeDiceDisplay() {
+    const container = document.getElementById('dice-container');
+    container.classList.remove('active');
+    
+    // Also hide in-game dice panel
+    const inGamePanel = document.getElementById('in-game-dice-panel');
+    inGamePanel.style.display = 'none';
+}
+
+// Function to trigger dice animation for testing
+window.testDiceRoll = function(diceType = 'd6', result = null) {
+    const actualResult = result || Math.floor(Math.random() * (diceType === 'd6' ? 6 : 12)) + 1;
+    showDiceRoll(diceType, 'movement', actualResult);
+};
+
+// Function to test player order dice
+window.testPlayerOrderDice = function() {
+    const mockPlayerData = {
+        'player1': { name: 'Alice', roll: Math.floor(Math.random() * 12) + 1 },
+        'player2': { name: 'Bob', roll: Math.floor(Math.random() * 12) + 1 },
+        'player3': { name: 'Charlie', roll: Math.floor(Math.random() * 12) + 1 }
+    };
+    
+    // Show highest roll for animation
+    const highestRoll = Math.max(...Object.values(mockPlayerData).map(p => p.roll));
+    showDiceRoll('d12', 'player_order', highestRoll, mockPlayerData);
+};
+
+// =============================================================================
+// ENHANCED GAME EVENT HANDLERS
+// =============================================================================
 
 // Initialize the game when page loads
 window.addEventListener('load', function() {

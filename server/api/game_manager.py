@@ -20,10 +20,11 @@ from game_logic.constants import AUTO_START_ENABLED, REQUIRED_PLAYERS_FOR_AUTO_S
 class GameManager:
     """Manages multiple concurrent game sessions"""
     
-    def __init__(self):
+    def __init__(self, socketio=None):
         self.games: Dict[str, Game] = {}  # game_id -> Game instance
         self.player_to_game: Dict[str, str] = {}    # socket_id -> game_id
         self.max_players = 4
+        self.socketio = socketio
         
     def create_game(self, player_name: str, socket_id: str) -> str:
         """Create a new game session"""
@@ -31,6 +32,12 @@ class GameManager:
         
         # Create new Game instance
         game = Game(game_id, self.max_players)
+        
+        # Set up socketio callback for dice events
+        if self.socketio:
+            def emit_to_game_room(event, data):
+                self.socketio.emit(event, data, room=game_id)
+            game.set_socketio_emit_callback(emit_to_game_room)
         
         # Create and add player
         player = Player(player_name, socket_id)

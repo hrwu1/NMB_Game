@@ -203,6 +203,9 @@ class Game:
             for sid in self.player_order
         ])
         self._log_event("turn_order", f"Turn order: {order_message}")
+        
+        # Emit dice roll event for player order determination
+        self._emit_player_order_dice_event(rolls)
     
     def _deal_starting_hand(self, player: Player) -> None:
         """Deal starting cards to a player"""
@@ -358,6 +361,9 @@ class Game:
             
             self._log_event("turn_started", 
                            f"{current_player.name}'s turn started (Movement: {movement_roll})")
+            
+            # Emit dice roll event for movement
+            self._emit_movement_dice_event(current_player, movement_roll)
     
     def end_turn(self, socket_id: str) -> Dict[str, Any]:
         """End current player's turn"""
@@ -582,6 +588,51 @@ class Game:
         self.defeat_reason = f"{defeat_type}: {message}"
         
         self._log_event("defeat", f"DEFEAT! {message}")
+    
+    # =============================================================================
+    # DICE EVENTS
+    # =============================================================================
+    
+    def _emit_player_order_dice_event(self, rolls: Dict[str, int]) -> None:
+        """Emit dice roll event for player order determination"""
+        # Prepare player data for the client
+        player_data = {}
+        for socket_id, roll in rolls.items():
+            player = self.players[socket_id]
+            player_data[socket_id] = {
+                'name': player.name,
+                'roll': roll
+            }
+        
+        # Find the highest roll for the animation
+        highest_roll = max(rolls.values())
+        
+        # Emit to all players in the game
+        if hasattr(self, '_socketio_emit'):
+            self._socketio_emit('dice_roll', {
+                'dice_type': 'd12',
+                'purpose': 'player_order',
+                'result': highest_roll,
+                'all_player_rolls': player_data,
+                'game_id': self.game_id
+            })
+    
+    def _emit_movement_dice_event(self, player: 'Player', roll: int) -> None:
+        """Emit dice roll event for movement"""
+        # Emit to all players in the game
+        if hasattr(self, '_socketio_emit'):
+            self._socketio_emit('dice_roll', {
+                'dice_type': 'd6',
+                'purpose': 'movement',
+                'result': roll,
+                'player_id': player.socket_id,
+                'player_name': player.name,
+                'game_id': self.game_id
+            })
+    
+    def set_socketio_emit_callback(self, emit_callback: Callable) -> None:
+        """Set the SocketIO emit callback for sending events to clients"""
+        self._socketio_emit = emit_callback
     
     # =============================================================================
     # UTILITY METHODS
