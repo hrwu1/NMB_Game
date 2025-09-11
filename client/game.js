@@ -1318,30 +1318,36 @@ function showDiceRoll(diceType, purpose, result, playerData = null) {
     setTimeout(() => {
         dice.classList.remove('rolling');
         
-        // Position dice to show the front face with result
+        // Update the front face to show the final result
+        setDiceFinalResult(dice, diceType, result);
+        
+        // Position dice to show the front face with result to the user
+        // Rotate to show front face clearly
         dice.style.transform = 'rotateX(0deg) rotateY(0deg) rotateZ(0deg)';
+        dice.style.transition = 'transform 0.8s ease-out';
         
-        // Add a gentle settle animation
-        dice.style.animation = 'diceSettle 0.5s ease-out';
-        
-        // Show the result number
+        // Show the result number in the display
         resultValue.textContent = result;
         
-        // Clean up the settle animation
+        // Add a gentle settle bounce
         setTimeout(() => {
-            dice.style.animation = '';
-        }, 500);
+            dice.style.animation = 'diceSettle 0.6s ease-out';
+            
+            setTimeout(() => {
+                dice.style.animation = '';
+            }, 600);
+        }, 300);
         
         // Special handling for player order determination
         if (purpose === 'player_order' && playerData) {
             setTimeout(() => {
                 showPlayerOrderResults(playerData);
-            }, 800);
+            }, 1200);
         } else {
             // For regular rolls, show close button after a moment
             setTimeout(() => {
                 closeBtn.style.display = 'block';
-            }, 1200);
+            }, 1500);
         }
         
         // Update in-game dice panel for movement rolls
@@ -1355,6 +1361,7 @@ function showDiceRoll(diceType, purpose, result, playerData = null) {
 function createDiceElement(diceType, finalResult) {
     const dice = document.createElement('div');
     dice.className = `dice ${diceType}`;
+    dice.dataset.finalResult = finalResult; // Store final result for later
     
     // Create 6 faces for cube
     const faces = ['front', 'back', 'right', 'left', 'top', 'bottom'];
@@ -1363,15 +1370,17 @@ function createDiceElement(diceType, finalResult) {
     faces.forEach((faceClass, index) => {
         const face = document.createElement('div');
         face.className = `dice-face ${faceClass}`;
+        face.dataset.faceValue = faceValues[faceClass];
         
-        const faceValue = faceValues[faceClass];
+        // Initially show random values (not the final result)
+        const displayValue = faceValues[faceClass];
         
-        if (diceType === 'd6' && faceValue <= 6) {
+        if (diceType === 'd6' && displayValue <= 6) {
             // For D6, show dots
-            face.innerHTML = createDiceDots(faceValue);
+            face.innerHTML = createDiceDots(displayValue);
         } else {
             // For D12 or numbers > 6, show the number
-            face.textContent = faceValue;
+            face.textContent = displayValue;
         }
         
         dice.appendChild(face);
@@ -1383,28 +1392,44 @@ function createDiceElement(diceType, finalResult) {
 function generateDiceFaceValues(diceType, finalResult) {
     const maxValue = diceType === 'd6' ? 6 : 12;
     
-    // Generate random values for all faces except front
+    // Generate random values for all faces - none show the final result initially
+    const availableValues = [];
+    for (let i = 1; i <= maxValue; i++) {
+        if (i !== finalResult) {
+            availableValues.push(i);
+        }
+    }
+    
+    // Shuffle available values
+    for (let i = availableValues.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [availableValues[i], availableValues[j]] = [availableValues[j], availableValues[i]];
+    }
+    
+    // Assign values to faces (final result will be set later)
     const values = {
-        front: finalResult,
-        back: Math.floor(Math.random() * maxValue) + 1,
-        right: Math.floor(Math.random() * maxValue) + 1,
-        left: Math.floor(Math.random() * maxValue) + 1,
-        top: Math.floor(Math.random() * maxValue) + 1,
-        bottom: Math.floor(Math.random() * maxValue) + 1
+        front: availableValues[0] || 1,
+        back: availableValues[1] || 2,
+        right: availableValues[2] || 3,
+        left: availableValues[3] || 4,
+        top: availableValues[4] || 5,
+        bottom: finalResult // The bottom face will have the final result
     };
     
-    // Make sure we don't have duplicates of the final result on visible faces
-    Object.keys(values).forEach(face => {
-        if (face !== 'front' && values[face] === finalResult) {
-            let newValue;
-            do {
-                newValue = Math.floor(Math.random() * maxValue) + 1;
-            } while (newValue === finalResult);
-            values[face] = newValue;
-        }
-    });
-    
     return values;
+}
+
+function setDiceFinalResult(dice, diceType, finalResult) {
+    // This function is called after rolling to show the final result
+    const frontFace = dice.querySelector('.dice-face.front');
+    
+    if (diceType === 'd6' && finalResult <= 6) {
+        frontFace.innerHTML = createDiceDots(finalResult);
+    } else {
+        frontFace.textContent = finalResult;
+    }
+    
+    frontFace.dataset.faceValue = finalResult;
 }
 
 function createDiceDots(number) {
@@ -1519,6 +1544,7 @@ function closeDiceDisplay() {
 // Function to trigger dice animation for testing
 window.testDiceRoll = function(diceType = 'd6', result = null) {
     const actualResult = result || Math.floor(Math.random() * (diceType === 'd6' ? 6 : 12)) + 1;
+    console.log(`🎲 Testing ${diceType} roll with result: ${actualResult}`);
     showDiceRoll(diceType, 'movement', actualResult);
 };
 
@@ -1532,7 +1558,22 @@ window.testPlayerOrderDice = function() {
     
     // Show highest roll for animation
     const highestRoll = Math.max(...Object.values(mockPlayerData).map(p => p.roll));
+    
+    console.log('🎯 Testing player order rolls:', mockPlayerData);
+    console.log(`Highest roll shown in animation: ${highestRoll}`);
+    
     showDiceRoll('d12', 'player_order', highestRoll, mockPlayerData);
+};
+
+// Quick test function for both dice types
+window.testBothDice = function() {
+    console.log('🎲 Testing D6 first...');
+    testDiceRoll('d6');
+    
+    setTimeout(() => {
+        console.log('🎲 Testing D12 after delay...');
+        testDiceRoll('d12');
+    }, 5000);
 };
 
 // =============================================================================
