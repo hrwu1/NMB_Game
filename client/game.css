@@ -887,12 +887,61 @@ button:disabled {
     margin: 10px 0;
 }
 
+.placement-instructions {
+    background: rgba(255, 152, 0, 0.1);
+    border: 1px solid rgba(255, 152, 0, 0.3);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 10px 0;
+}
+
 .pawn-placement-info .action-btn {
     width: 100%;
     margin-top: 10px;
     font-size: 1.1em;
     padding: 12px;
     font-weight: bold;
+}
+
+/* Pawn Placement Board Highlighting */
+.pawn-placement-available {
+    background: linear-gradient(135deg, #4CAF50, #45a049) !important;
+    border: 2px solid #66BB6A !important;
+    box-shadow: 
+        0 0 12px rgba(76, 175, 80, 0.8),
+        inset 0 1px 2px rgba(255, 255, 255, 0.3) !important;
+    animation: pawnPlacementPulse 2s ease-in-out infinite;
+    cursor: pointer !important;
+}
+
+.pawn-placement-available::before {
+    content: '🎯' !important;
+    color: white !important;
+    font-size: 8px !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8) !important;
+}
+
+.pawn-placement-available:hover {
+    transform: scale(1.15) !important;
+    box-shadow: 
+        0 0 20px rgba(76, 175, 80, 1),
+        inset 0 1px 2px rgba(255, 255, 255, 0.4) !important;
+    border-color: #81C784 !important;
+}
+
+@keyframes pawnPlacementPulse {
+    0%, 100% { 
+        box-shadow: 
+            0 0 12px rgba(76, 175, 80, 0.8),
+            inset 0 1px 2px rgba(255, 255, 255, 0.3);
+        border-color: #66BB6A;
+    }
+    50% { 
+        box-shadow: 
+            0 0 20px rgba(76, 175, 80, 1),
+            inset 0 1px 2px rgba(255, 255, 255, 0.4);
+        border-color: #81C784;
+    }
 }
 
 /* Action Buttons */

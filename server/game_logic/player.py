@@ -377,19 +377,24 @@ class Player:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert player to dictionary for JSON serialization"""
+        # Handle position serialization (position can be None before placement)
+        position_data = None
+        if self.position is not None:
+            position_data = {
+                "tile_x": self.position.tile_x,
+                "tile_y": self.position.tile_y,
+                "sub_x": self.position.sub_x,
+                "sub_y": self.position.sub_y,
+                "absolute_coords": self.position.to_absolute_coords()
+            }
+        
         return {
             "player_id": self.player_id,
             "name": self.name,
             "socket_id": self.socket_id,
             "disorder": self.disorder,
             "floor": self.floor,
-            "position": {
-                "tile_x": self.position.tile_x,
-                "tile_y": self.position.tile_y,
-                "sub_x": self.position.sub_x,
-                "sub_y": self.position.sub_y,
-                "absolute_coords": self.position.to_absolute_coords()
-            },
+            "position": position_data,
             "current_tile_id": self.current_tile_id,
             "movement_points": self.movement_points,
             "movement_used": self.movement_used,

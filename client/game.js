@@ -103,6 +103,14 @@ function connectToServer() {
     socket.on('player_joined', function(data) {
         addLog(data.message, 'system');
         updateLobbyPlayerCount(data.player_count, data.max_players);
+        
+        // Hide start button if game auto-starts (indicated by message containing "auto-start")
+        if (data.message && data.message.toLowerCase().includes('auto-start')) {
+            const startBtn = document.getElementById('startGameBtn');
+            if (startBtn) {
+                startBtn.style.display = 'none';
+            }
+        }
     });
     
     socket.on('game_started', function(data) {
@@ -127,6 +135,14 @@ function connectToServer() {
         if (oldState === 'pawn_placement' && gameState.state === 'playing') {
             addLog('🎮 All pawns placed! Normal gameplay begins!', 'success');
             showToast('All pawns placed! Game started!', 'success');
+        }
+        
+        // Hide start button if game moves beyond waiting state
+        if (gameState.state !== 'waiting') {
+            const startBtn = document.getElementById('startGameBtn');
+            if (startBtn) {
+                startBtn.style.display = 'none';
+            }
         }
         
         updateGameDisplay();
@@ -333,6 +349,15 @@ function updateGameBoard() {
                 if (isMovable) {
                     // Add tile styling based on type
                     subDiv.classList.add(`tile-${tileData.tile_type}`);
+                    
+                    // Add special styling during pawn placement phase
+                    if (gameState && gameState.state === 'pawn_placement' && 
+                        gameState.current_player === socket.id) {
+                        // Highlight clickable positions on the starting tile
+                        if (tile_x === 2 && tile_y === 2 && selectedFloor === 2) {
+                            subDiv.classList.add('pawn-placement-available');
+                        }
+                    }
                 } else {
                     // Non-movable position (wall/blocked)
                     subDiv.classList.add('tile-wall');
@@ -354,7 +379,7 @@ function updateGameBoard() {
                     subDiv.appendChild(pawnDiv);
                 });
                 
-                // Add click handler for movement
+                // Add click handler for both movement and pawn placement
                 if (isMovable) {
                     subDiv.addEventListener('click', () => handleSubPositionClick(tile_x, tile_y, sub_x, sub_y));
                 }
@@ -427,10 +452,10 @@ function updateActionButtons() {
             <div class="pawn-placement-info">
                 <h4>🎯 Pawn Placement Phase</h4>
                 <p>Players placed: ${pawnPlacement.players_placed?.length || 0}/${pawnPlacement.total_players || 0}</p>
-                <p style="color: #ff9800; margin-bottom: 15px;">Your turn to place your pawn!</p>
-                <button class="action-btn primary" onclick="performAction('place_pawn')">
-                    🎯 Place Pawn
-                </button>
+                <div class="placement-instructions">
+                    <p style="color: #ff9800; margin-bottom: 10px;">🖱️ <strong>Click on the board to place your pawn!</strong></p>
+                    <p style="color: #888; font-size: 0.9em; margin: 0;">Click on any green square on the starting tile</p>
+                </div>
             </div>
         `;
         return;
@@ -641,13 +666,8 @@ function performAction(actionType) {
     console.log('✅ DEBUG: Game state exists, proceeding...');
     let actionData = {};
     
-    // Handle pawn placement action
-    if (actionType === 'place_pawn') {
-        // For now, just send empty data - server will handle placement logic
-        actionData = {};
-    } 
     // Handle different action types
-    else if (actionType === 'move') {
+    if (actionType === 'move') {
         // For now, just use current position + 1 as target (simplified)
         const currentPlayer = getCurrentPlayer();
         const pos = currentPlayer.position;
@@ -726,8 +746,18 @@ function handleSubPositionClick(tile_x, tile_y, sub_x, sub_y) {
     
     const currentPlayer = getCurrentPlayer();
     
-    // Check if this is a move action
-    if (currentPlayer.movement_points > currentPlayer.movement_used) {
+    // Handle pawn placement phase
+    if (gameState.state === 'pawn_placement') {
+        // Check if player has already placed their pawn
+        const pawnPlacement = gameState.pawn_placement || {};
+        const hasPlaced = pawnPlacement.players_placed?.includes(socket.id);
+        
+        if (hasPlaced) {
+            addLog('You have already placed your pawn!', 'warning');
+            return;
+        }
+        
+        // Place pawn at clicked position
         const actionData = {
             target_position: { 
                 tile_x: tile_x, 
@@ -739,11 +769,35 @@ function handleSubPositionClick(tile_x, tile_y, sub_x, sub_y) {
         };
         
         socket.emit('player_action', {
-            action_type: 'move',
+            action_type: 'place_pawn',
             action_data: actionData
         });
         
-        addLog(`Moving to tile (${tile_x},${tile_y}) sub-position (${sub_x},${sub_y})`, 'action');
+        addLog(`Placing pawn at tile (${tile_x},${tile_y}) sub-position (${sub_x},${sub_y})`, 'action');
+        return;
+    }
+    
+    // Handle normal gameplay movement
+    if (gameState.state === 'playing') {
+        // Check if this is a move action
+        if (currentPlayer.movement_points > currentPlayer.movement_used) {
+            const actionData = {
+                target_position: { 
+                    tile_x: tile_x, 
+                    tile_y: tile_y,
+                    sub_x: sub_x,
+                    sub_y: sub_y,
+                    floor: selectedFloor 
+                }
+            };
+            
+            socket.emit('player_action', {
+                action_type: 'move',
+                action_data: actionData
+            });
+            
+            addLog(`Moving to tile (${tile_x},${tile_y}) sub-position (${sub_x},${sub_y})`, 'action');
+        }
     }
 }
 
@@ -1075,11 +1129,17 @@ function showLobbyStatus(gameId, playerCount, maxPlayers, isHost) {
     // Update player count
     playerCountDisplay.textContent = `${playerCount}/${maxPlayers} players`;
     
-    // Update status text
+    // Update status text (auto-start happens at 2+ players)
     if (playerCount >= 2) {
-        lobbyStatusText.textContent = isHost ? 'Ready to start! Click "Start Game"' : 'Ready to start! Waiting for host...';
-        lobbyStatusText.className = 'status-ready';
-        requirementText.textContent = 'Game is ready to start!';
+        lobbyStatusText.textContent = 'Auto-starting game...';
+        lobbyStatusText.className = 'status-starting';
+        requirementText.textContent = 'Game will start automatically!';
+        
+        // Hide the start button since auto-start will happen
+        const startBtn = document.getElementById('startGameBtn');
+        if (startBtn) {
+            startBtn.style.display = 'none';
+        }
     } else {
         lobbyStatusText.textContent = 'Waiting for more players...';
         lobbyStatusText.className = 'status-waiting';
@@ -1101,9 +1161,15 @@ function updateLobbyPlayerCount(playerCount, maxPlayers) {
     
     if (lobbyStatusText) {
         if (playerCount >= 2) {
-            lobbyStatusText.textContent = 'Ready to start!';
-            lobbyStatusText.className = 'status-ready';
-            requirementText.textContent = 'Game is ready to start!';
+            lobbyStatusText.textContent = 'Auto-starting game...';
+            lobbyStatusText.className = 'status-starting';
+            requirementText.textContent = 'Game will start automatically!';
+            
+            // Hide the start button since auto-start will happen
+            const startBtn = document.getElementById('startGameBtn');
+            if (startBtn) {
+                startBtn.style.display = 'none';
+            }
         } else {
             lobbyStatusText.textContent = 'Waiting for more players...';
             lobbyStatusText.className = 'status-waiting';

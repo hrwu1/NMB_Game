@@ -138,7 +138,8 @@ class Game:
     
     def get_current_player(self) -> Optional[Player]:
         """Get the player whose turn it is"""
-        if not self.player_order or self.state != GameState.PLAYING:
+        # Allow turns during both pawn placement and normal gameplay
+        if not self.player_order or self.state not in [GameState.PAWN_PLACEMENT, GameState.PLAYING]:
             return None
         
         current_socket_id = self.player_order[self.current_player_index]
@@ -154,8 +155,14 @@ class Game:
     
     def start_game(self) -> Dict[str, Any]:
         """Start the game"""
-        if self.state != GameState.WAITING:
-            return {"success": False, "reason": "Game is not in waiting state"}
+        if self.state == GameState.PAWN_PLACEMENT:
+            return {"success": False, "reason": "Game has already started - players are placing pawns"}
+        elif self.state == GameState.PLAYING:
+            return {"success": False, "reason": "Game is already in progress"}
+        elif self.state == GameState.FINISHED:
+            return {"success": False, "reason": "Game has already finished"}
+        elif self.state != GameState.WAITING:
+            return {"success": False, "reason": f"Game is not in waiting state (current state: {self.state.value})"}
         
         if len(self.players) < MIN_PLAYERS:
             return {"success": False, "reason": f"Need at least {MIN_PLAYERS} players"}
@@ -233,29 +240,67 @@ class Game:
         
         player = self.players[socket_id]
         
-        # For now, always place on the initial tile at center position
-        # Later we can allow choosing specific sub-positions
-        from .board import Position
-        player.position = Position(
-            tile_x=INITIAL_POSITION[0],
-            tile_y=INITIAL_POSITION[1],
-            sub_x=1,  # Center of tile
-            sub_y=1,
-            floor=INITIAL_FLOOR
-        )
-        player.floor = INITIAL_FLOOR
+        # Get target position from placement_data
+        target_position = placement_data.get("target_position")
+        if not target_position:
+            return {"success": False, "reason": "Target position is required"}
+        
+        try:
+            # Validate and create position
+            from .board import Position
+            target_pos = Position(
+                tile_x=target_position["tile_x"],
+                tile_y=target_position["tile_y"],
+                sub_x=target_position["sub_x"],
+                sub_y=target_position["sub_y"],
+                floor=target_position.get("floor", INITIAL_FLOOR)
+            )
+        except (KeyError, ValueError) as e:
+            return {"success": False, "reason": f"Invalid target position: {str(e)}"}
+        
+        # Validate placement position (must be on initial tile and movable)
+        if (target_pos.tile_x != INITIAL_POSITION[0] or 
+            target_pos.tile_y != INITIAL_POSITION[1] or 
+            target_pos.floor != INITIAL_FLOOR):
+            return {"success": False, "reason": "Can only place pawn on the starting tile"}
+        
+        # Check if position is movable
+        if not self.board.is_position_movable(target_pos):
+            return {"success": False, "reason": "Cannot place pawn on walls or blocked areas"}
+        
+        # Check if position is already occupied by another player
+        for other_player in self.players.values():
+            if (other_player.socket_id != socket_id and 
+                other_player.position and
+                other_player.position.tile_x == target_pos.tile_x and
+                other_player.position.tile_y == target_pos.tile_y and
+                other_player.position.sub_x == target_pos.sub_x and
+                other_player.position.sub_y == target_pos.sub_y and
+                other_player.floor == target_pos.floor):
+                return {"success": False, "reason": "Position already occupied by another player"}
+        
+        # Place the pawn
+        player.position = target_pos
+        player.floor = target_pos.floor
         
         # Mark player as having placed their pawn
         self.players_placed_pawns.add(socket_id)
         
-        self._log_event("pawn_placed", f"{player.name} placed their pawn")
+        self._log_event("pawn_placed", f"{player.name} placed their pawn at ({target_pos.tile_x},{target_pos.tile_y}) sub-pos ({target_pos.sub_x},{target_pos.sub_y})")
         
         # Automatically end turn after placing pawn
         self._advance_pawn_placement_turn()
         
         return {
             "success": True, 
-            "message": f"Pawn placed successfully!",
+            "message": f"Pawn placed at selected position!",
+            "position": {
+                "tile_x": target_pos.tile_x,
+                "tile_y": target_pos.tile_y, 
+                "sub_x": target_pos.sub_x,
+                "sub_y": target_pos.sub_y,
+                "floor": target_pos.floor
+            },
             "players_placed": len(self.players_placed_pawns),
             "total_players": len(self.players)
         }
@@ -302,13 +347,17 @@ class Game:
         # Start current player's turn
         current_player.start_turn()
         
-        # Roll movement dice
-        movement_roll = self._roll_dice(MOVEMENT_DIE)
-        current_player.set_movement_points(movement_roll)
-        self.dice_results[f"movement_{current_player.socket_id}"] = movement_roll
-        
-        self._log_event("turn_started", 
-                       f"{current_player.name}'s turn started (Movement: {movement_roll})")
+        # During pawn placement, don't roll dice or set movement points
+        if self.state == GameState.PAWN_PLACEMENT:
+            self._log_event("turn_started", f"{current_player.name}'s turn - place your pawn!")
+        else:
+            # Roll movement dice only during normal gameplay
+            movement_roll = self._roll_dice(MOVEMENT_DIE)
+            current_player.set_movement_points(movement_roll)
+            self.dice_results[f"movement_{current_player.socket_id}"] = movement_roll
+            
+            self._log_event("turn_started", 
+                           f"{current_player.name}'s turn started (Movement: {movement_roll})")
     
     def end_turn(self, socket_id: str) -> Dict[str, Any]:
         """End current player's turn"""
