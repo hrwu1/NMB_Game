@@ -225,25 +225,8 @@ def action_explore(game, socket_id: str, explore_data: Dict[str, Any]) -> Dict[s
         disorder_increase = 1
         player.update_disorder(disorder_increase, "placed disordered tile")
     
-    # Use remaining movement to continue onto new tile
-    remaining_movement = player.get_remaining_movement()
-    if remaining_movement > 0:
-        # Move to new tile - find a valid entrance point
-        entrance_points = new_tile.get_entrance_points()
-        if entrance_points:
-            entrance_pos = entrance_points[0]  # Use first available entrance
-            # Create proper Position with tile + sub coordinates
-            new_position = Position(
-                tile_x=place_pos.x,
-                tile_y=place_pos.y,
-                sub_x=entrance_pos[0],
-                sub_y=entrance_pos[1],
-                floor=place_pos.floor
-            )
-            player.use_movement_points(1)
-            player.update_position(new_position)
-            player.floor = place_pos.floor
-            player.current_tile_id = new_tile.tile_id
+    # Player stays at their current position when exploring
+    # (The pawn does not move onto the newly placed tile)
     
     # Update statistics
     player.stats['tiles_explored'] += 1
@@ -258,7 +241,7 @@ def action_explore(game, socket_id: str, explore_data: Dict[str, Any]) -> Dict[s
         "player": player.name,
         "tile_placed": new_tile.to_dict(),
         "disorder_increase": disorder_increase,
-        "moved_to_tile": remaining_movement > 0,
+        "moved_to_tile": False,  # Player stays in place when exploring
         "remaining_movement": player.get_remaining_movement()
     }
 
@@ -279,7 +262,12 @@ def action_fall(game, socket_id: str, fall_data: Dict[str, Any] = None) -> Dict[
     path_card = game.decks[CardType.PATH_TILE].draw()
     if path_card:
         # Place tile at player's position on new floor
-        fall_pos = Position(player.position[0], player.position[1], player.floor)
+        from .board import TilePosition
+        fall_pos = TilePosition(
+            x=player.position.tile_x,
+            y=player.position.tile_y, 
+            floor=player.floor
+        )
         
         new_tile = PathTile(
             tile_id=path_card.card_id,
